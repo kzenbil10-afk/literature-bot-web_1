@@ -321,6 +321,12 @@
       <label for="manAbstract">Özet (opsiyonel)</label>
       <textarea id="manAbstract" rows="4" placeholder="Varsa özet metnini buraya yapıştırın — sentezde kullanılır"></textarea>
 
+      <label for="manPdfFile">PDF olarak ekle (opsiyonel)</label>
+      <div class="status-line">Elinizde tezin/makalenin PDF'i varsa buradan yükleyin — sadece özet değil,
+        PDF'in TAM METNİ taslak/sentez oluştururken kullanılır (kendi API key'inizle taslak oluşturduğunuzda).</div>
+      <input type="file" id="manPdfFile" accept="application/pdf,.pdf">
+      <div id="pdfUploadStatus" class="status-line"></div>
+
       <div class="row">
         <div>
           <label for="manCollection">Koleksiyon</label>
@@ -898,6 +904,64 @@ yardımcısıdır; atıf ve iddiaları orijinal kaynaklarla doğrulayın.</foote
     }
   });
 
+  // Holds the extracted full text (and metadata) of a PDF the user picked
+  // in the manual-add form, so it can be merged into the paper payload when
+  // "Kütüphaneye Ekle" is clicked. Uploading happens as soon as a file is
+  // chosen (below), independent of the save click, so the user gets
+  // immediate feedback ("X karakter çıkarıldı") before saving.
+  let manPdfFulltext = null;
+
+  document.getElementById("manPdfFile").addEventListener("change", async () => {
+    const fileInput = document.getElementById("manPdfFile");
+    const pdfStatus = document.getElementById("pdfUploadStatus");
+    manPdfFulltext = null;
+    const file = fileInput.files && fileInput.files[0];
+    if (!file) {
+      pdfStatus.textContent = "";
+      return;
+    }
+    pdfStatus.className = "status-line";
+    pdfStatus.textContent = "PDF yükleniyor ve metin çıkarılıyor…";
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      // Deliberately NOT using api()/apiJson() here -- they force
+      // Content-Type: application/json, which breaks a multipart upload.
+      // The browser must set its own multipart boundary, so Content-Type
+      // is left unset.
+      const resp = await fetch("/api/upload-pdf", {
+        method: "POST",
+        headers: { Authorization: "Bearer " + getToken() },
+        body: formData,
+      });
+      const r = await resp.json();
+      if (!resp.ok) {
+        throw new Error(r.message || r.error || "PDF işlenemedi.");
+      }
+      if (r.fulltext_status === "ok" && r.fulltext_text_inline) {
+        manPdfFulltext = {
+          fulltext_status: r.fulltext_status,
+          fulltext_text_inline: r.fulltext_text_inline,
+          fulltext_method: r.fulltext_method,
+          fulltext_chars: r.fulltext_chars,
+          fulltext_possibly_garbled: r.fulltext_possibly_garbled,
+        };
+        pdfStatus.className = "status-line ok";
+        pdfStatus.textContent = `${r.fulltext_chars} karakter metin çıkarıldı — kaydedince TAM METİN olarak kullanılacak (kendi API key'inizle taslak oluştururken).`;
+        if (r.fulltext_possibly_garbled) {
+          pdfStatus.textContent += " Not: metin bozuk çıkmış olabilir, PDF taranmış/görüntü ağırlıklı olabilir.";
+        }
+      } else {
+        pdfStatus.className = "status-line err";
+        pdfStatus.textContent = "PDF'den metin çıkarılamadı; yine de dosya olmadan başlık/özet ile kaydedebilirsiniz.";
+      }
+    } catch (e) {
+      manPdfFulltext = null;
+      pdfStatus.className = "status-line err";
+      pdfStatus.textContent = "Hata: " + e.message;
+    }
+  });
+
   document.getElementById("btnManualSave").addEventListener("click", async () => {
     const statusSpan = document.getElementById("manualAddStatus");
     const title = document.getElementById("manTitle").value.trim();
@@ -917,6 +981,9 @@ yardımcısıdır; atıf ve iddiaları orijinal kaynaklarla doğrulayın.</foote
       abstract: document.getElementById("manAbstract").value.trim() || null,
       source: "manual",
     };
+    if (manPdfFulltext) {
+      Object.assign(paper, manPdfFulltext);
+    }
     const btn = document.getElementById("btnManualSave");
     btn.disabled = true;
     btn.textContent = "Kaydediliyor…";
@@ -928,11 +995,14 @@ yardımcısıdır; atıf ve iddiaları orijinal kaynaklarla doğrulayın.</foote
         body: JSON.stringify({ paper, collection: document.getElementById("manCollection").value || "genel" }),
       });
       statusSpan.className = "status-line ok";
-      statusSpan.textContent = `Kaydedildi (id=${r.id}).`;
+      statusSpan.textContent = `Kaydedildi (id=${r.id}).` + (manPdfFulltext ? " PDF tam metni dahil edildi." : "");
       ["manDoi", "manTitle", "manAuthors", "manYear", "manVenue", "manUrl", "manAbstract"].forEach(id => {
         document.getElementById(id).value = "";
       });
       document.getElementById("doiLookupStatus").textContent = "";
+      document.getElementById("manPdfFile").value = "";
+      document.getElementById("pdfUploadStatus").textContent = "";
+      manPdfFulltext = null;
       refreshLibrary();
     } catch (e) {
       statusSpan.className = "status-line err";

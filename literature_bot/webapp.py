@@ -61,6 +61,8 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from literature_bot import llm_client, storage
 from literature_bot.citations import bibliography_bibtex, format_apa
 from literature_bot.fulltext import (
+    MAX_PDF_BYTES,
+    extract_fulltext,
     preview_one_fulltext,
     resolve_pdf_url,
     save_one_fulltext,
@@ -103,6 +105,12 @@ def _ensure_dergipark_cache() -> None:
 _ensure_dergipark_cache()
 
 app = Flask(__name__, static_folder=STATIC_DIR, static_url_path="/static")
+app.config["MAX_CONTENT_LENGTH"] = MAX_PDF_BYTES + (1 * 1024 * 1024)  # PDF cap + a little slack for form overhead
+
+
+@app.errorhandler(413)
+def _too_large(_e):
+    return jsonify({"error": "bad_request", "message": "Dosya çok büyük (en fazla 40MB)"}), 413
 
 _SOURCE_LABELS_TR = {
     "openalex": "OpenAlex",
@@ -430,6 +438,55 @@ def api_lookup_doi():
     if paper is None:
         return jsonify({"error": "not_found", "message": "Bu DOI için kayıt bulunamadı"}), 404
     return jsonify({"paper": _paper_out(paper)})
+
+
+@app.route("/api/upload-pdf", methods=["POST"])
+@_json_errors
+def api_upload_pdf():
+    """Convenience for the manual-add-source form: extract the text of a PDF
+    the person uploads directly from their computer (a thesis or article PDF
+    they already have, e.g. downloaded from YÖK Tez), so it's used as real
+    full text -- not just a title/abstract -- when a draft is later
+    generated from the library (see synthesis.py's _paper_source_block,
+    which prefers fulltext_text_inline over the abstract whenever it's
+    present). Nothing is saved to the library here; the front end holds the
+    extracted text and includes it in the /api/save call once the person
+    clicks "Kütüphaneye Ekle", exactly like the fields from DOI auto-fill."""
+    upload = request.files.get("file")
+    if upload is None or not upload.filename:
+        return jsonify({"error": "bad_request", "message": "PDF dosyası bulunamadı"}), 400
+
+    tmp_dir = tempfile.mkdtemp(prefix="litbot_upload_")
+    try:
+        tmp_path = os.path.join(tmp_dir, "upload.pdf")
+        upload.save(tmp_path)
+
+        with open(tmp_path, "rb") as f:
+            head = f.read(4)
+        if head != b"%PDF":
+            return jsonify({"error": "bad_request", "message": "Bu dosya geçerli bir PDF değil"}), 400
+
+        result = extract_fulltext(tmp_path, ocr_max_pages=15)
+        text = result["text"]
+        if not text:
+            return jsonify(
+                {
+                    "error": "extract_failed",
+                    "message": "PDF'ten metin çıkarılamadı (taranmış bir belge olup OCR mevcut olmayabilir)",
+                }
+            ), 422
+
+        return jsonify(
+            {
+                "fulltext_text_inline": text,
+                "fulltext_status": "ok",
+                "fulltext_method": result["method"],
+                "fulltext_chars": len(text),
+                "fulltext_possibly_garbled": result["possibly_garbled"],
+            }
+        )
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 # ---------------------------------------------------------------------------
