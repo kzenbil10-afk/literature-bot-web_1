@@ -95,7 +95,6 @@ _SOURCE_LABELS_TR = {
     "semanticscholar": "Semantic Scholar",
     "pubmed": "PubMed",
     "dergipark": "DergiPark",
-    "yok_tez": "YÖK Ulusal Tez Merkezi",
 }
 
 APP_PASSWORD = os.environ.get("APP_PASSWORD")
@@ -175,37 +174,6 @@ def health():
             "sources": [{"id": s, "label": _SOURCE_LABELS_TR.get(s, s)} for s in ALL_SOURCES],
         }
     )
-
-
-# Temporary debug route while diagnosing why the yok_tez source returns 0
-# results specifically on Render (works fine locally) -- safe to remove
-# once that's understood.
-@app.route("/api/debug-yok")
-@_json_errors
-def debug_yok():
-    import requests as _requests
-    from literature_bot.sources import yok_tez as _yok
-
-    info = {}
-    try:
-        session = _requests.Session()
-        headers = {"User-Agent": _yok.USER_AGENT}
-        r1 = session.get(_yok.HOME_URL, headers=headers, timeout=40)
-        info["get_status"] = r1.status_code
-        info["get_cookies"] = dict(session.cookies)
-        r2 = session.post(
-            _yok.SEARCH_URL,
-            headers=headers,
-            data={"izin": "0", "tur": "0", "neden": "yapay zeka", "islem": "1"},
-            timeout=40,
-        )
-        info["post_status"] = r2.status_code
-        info["post_len"] = len(r2.text)
-        info["has_reference_data"] = "referenceData" in r2.text
-        info["post_snippet"] = r2.text[:500]
-    except Exception as e:
-        info["exception"] = f"{type(e).__name__}: {e}"
-    return jsonify(info)
 
 
 # ---------------------------------------------------------------------------

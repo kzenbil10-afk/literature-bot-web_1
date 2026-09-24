@@ -131,6 +131,10 @@
   .status-line { font-size: 0.8rem; color: var(--muted); margin: 6px 0; }
   .status-line.ok { color: var(--green); }
   .status-line.err { color: var(--red); }
+  .external-links { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--card-alt, transparent); }
+  .external-links .ext-label { font-size: 0.8rem; color: var(--muted); }
+  .external-links a.ext-link { font-size: 0.85rem; text-decoration: none; padding: 4px 10px; border-radius: 6px; border: 1px solid var(--border); }
+  .external-links a.ext-link:hover { background: var(--hover, rgba(127,127,127,0.1)); }
 
   .spinner {
     display: inline-block; width: 14px; height: 14px;
@@ -213,6 +217,7 @@
       </div>
     </div>
 
+    <div id="externalLinksBox" class="external-links" style="display:none;"></div>
     <div id="deepSynthesisBox"></div>
     <div id="results"></div>
   </section>
@@ -228,9 +233,56 @@
       </div>
       <div class="actions-row">
         <button class="btn secondary" id="btnRefreshLibrary">Yenile</button>
+        <button class="btn secondary" id="btnToggleManualAdd">+ Manuel Kaynak Ekle</button>
         <span id="libraryStatus" class="status-line"></span>
       </div>
     </div>
+
+    <div class="card" id="manualAddBox" style="display:none;">
+      <div class="status-line">YÖK Tez Merkezi, Google Scholar veya başka bir sitede bulduğunuz bir makale/tezi
+        buradan kütüphanenize ekleyin — taslak oluştururken ve derin sentezde diğer kaynaklarla birlikte kullanılır.</div>
+
+      <label for="manTitle">Başlık *</label>
+      <input type="text" id="manTitle" placeholder="Tez veya makale başlığı">
+
+      <div class="row">
+        <div>
+          <label for="manAuthors">Yazar(lar)</label>
+          <input type="text" id="manAuthors" placeholder="Ad Soyad, Ad Soyad (virgülle ayırın)">
+        </div>
+        <div>
+          <label for="manYear">Yıl</label>
+          <input type="number" id="manYear" placeholder="2026">
+        </div>
+      </div>
+
+      <div class="row">
+        <div>
+          <label for="manVenue">Üniversite / Dergi</label>
+          <input type="text" id="manVenue" placeholder="örn. Ankara Üniversitesi (Doktora Tezi)">
+        </div>
+        <div>
+          <label for="manUrl">Bağlantı (URL)</label>
+          <input type="text" id="manUrl" placeholder="https://...">
+        </div>
+      </div>
+
+      <label for="manAbstract">Özet (opsiyonel)</label>
+      <textarea id="manAbstract" rows="4" placeholder="Varsa özet metnini buraya yapıştırın — sentezde kullanılır"></textarea>
+
+      <div class="row">
+        <div>
+          <label for="manCollection">Koleksiyon</label>
+          <input type="text" id="manCollection" value="genel" placeholder="koleksiyon">
+        </div>
+      </div>
+
+      <div class="actions-row">
+        <button class="btn" id="btnManualSave">Kütüphaneye Ekle</button>
+        <span id="manualAddStatus" class="status-line"></span>
+      </div>
+    </div>
+
     <div id="libraryList"></div>
   </section>
 
@@ -494,6 +546,30 @@ yardımcısıdır; atıf ve iddiaları orijinal kaynaklarla doğrulayın.</foote
     papers.forEach((p, i) => box.appendChild(paperCard(p, i)));
   }
 
+  // YÖK Ulusal Tez Merkezi and Google Scholar have no reliable automated
+  // search from this server (YÖK's firewall blocks Render's server IP;
+  // Google's robots.txt explicitly disallows crawling /scholar) -- rather
+  // than scrape around those protections, we just hand the visitor a
+  // ready-made link so *they* search it themselves, as a normal visitor,
+  // in their own browser. No bot detection involved either way.
+  function renderExternalLinks(query) {
+    const box = document.getElementById("externalLinksBox");
+    box.innerHTML = "";
+    if (!query) { box.style.display = "none"; return; }
+    const encoded = encodeURIComponent(query);
+    const label = el("span", { class: "ext-label" }, [txt("Bu sitelerde otomatik arama yapamıyoruz (bot koruması) — kendi tarayıcınızda açıp aynı konuyla arayın:")]);
+    const yokLink = el("a", {
+      class: "ext-link", href: "https://tez.yok.gov.tr/UlusalTezMerkezi/", target: "_blank", rel: "noopener",
+    }, [txt("YÖK Tez Merkezi'nde ara ↗")]);
+    const scholarLink = el("a", {
+      class: "ext-link", href: `https://scholar.google.com/scholar?q=${encoded}&hl=tr`, target: "_blank", rel: "noopener",
+    }, [txt("Google Scholar'da ara ↗")]);
+    box.appendChild(label);
+    box.appendChild(yokLink);
+    box.appendChild(scholarLink);
+    box.style.display = "flex";
+  }
+
   function mdToHtmlLite(md) {
     return (md || "")
       .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
@@ -532,6 +608,7 @@ yardımcısıdır; atıf ve iddiaları orijinal kaynaklarla doğrulayın.</foote
       state.lastQuery = q;
       localStorage.setItem("litbot_last_results", JSON.stringify(r.papers));
       localStorage.setItem("litbot_last_query", q);
+      renderExternalLinks(q);
 
       let statusMsg = `${r.unique_total} sonuç (ham: ${r.raw_total})`;
       if (r.translation_status) statusMsg += ` · çeviri: ${r.translation_status.translated || 0} çevrildi`;
@@ -552,6 +629,7 @@ yardımcısıdır; atıf ve iddiaları orijinal kaynaklarla doğrulayın.</foote
   if (state.lastResults.length) {
     document.getElementById("q").value = state.lastQuery;
     renderResults(state.lastResults, null);
+    renderExternalLinks(state.lastQuery);
     document.getElementById("searchStatus").textContent = `(önceki arama sonuçları gösteriliyor: "${state.lastQuery}")`;
   }
 
@@ -629,6 +707,60 @@ yardımcısıdır; atıf ve iddiaları orijinal kaynaklarla doğrulayın.</foote
   }
   document.getElementById("btnRefreshLibrary").addEventListener("click", refreshLibrary);
   document.getElementById("libCollection").addEventListener("change", refreshLibrary);
+
+  // Manually add a paper/thesis found on a site the bot can't search
+  // automatically (YÖK Tez Merkezi, Google Scholar, ...) -- goes straight
+  // into the library via the same /api/save endpoint search results use, so
+  // it's picked up by "Taslak Oluştur" / deep synthesis exactly like any
+  // other saved source.
+  const manualBox = document.getElementById("manualAddBox");
+  document.getElementById("btnToggleManualAdd").addEventListener("click", () => {
+    manualBox.style.display = manualBox.style.display === "none" ? "block" : "none";
+  });
+
+  document.getElementById("btnManualSave").addEventListener("click", async () => {
+    const statusSpan = document.getElementById("manualAddStatus");
+    const title = document.getElementById("manTitle").value.trim();
+    if (!title) {
+      statusSpan.className = "status-line err";
+      statusSpan.textContent = "Başlık zorunlu.";
+      return;
+    }
+    const authors = document.getElementById("manAuthors").value.split(",").map(s => s.trim()).filter(Boolean);
+    const yearRaw = document.getElementById("manYear").value.trim();
+    const paper = {
+      title,
+      authors,
+      year: yearRaw ? parseInt(yearRaw, 10) : null,
+      venue: document.getElementById("manVenue").value.trim() || null,
+      url: document.getElementById("manUrl").value.trim() || null,
+      abstract: document.getElementById("manAbstract").value.trim() || null,
+      source: "manual",
+    };
+    const btn = document.getElementById("btnManualSave");
+    btn.disabled = true;
+    btn.textContent = "Kaydediliyor…";
+    statusSpan.className = "status-line";
+    statusSpan.textContent = "";
+    try {
+      const r = await apiJson("/api/save", {
+        method: "POST",
+        body: JSON.stringify({ paper, collection: document.getElementById("manCollection").value || "genel" }),
+      });
+      statusSpan.className = "status-line ok";
+      statusSpan.textContent = `Kaydedildi (id=${r.id}).`;
+      ["manTitle", "manAuthors", "manYear", "manVenue", "manUrl", "manAbstract"].forEach(id => {
+        document.getElementById(id).value = "";
+      });
+      refreshLibrary();
+    } catch (e) {
+      statusSpan.className = "status-line err";
+      statusSpan.textContent = "Hata: " + e.message;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "Kütüphaneye Ekle";
+    }
+  });
 
   // ---------------------------------------------------------------------
   // DRAFT

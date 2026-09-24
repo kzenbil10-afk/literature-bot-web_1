@@ -1,4 +1,12 @@
-"""literature-bot: çok kaynaklı literatür taraması, kaynak bulma ve derinlemesine
-araştırma (deep research) aracı."""
+from . import arxiv, crossref, dergipark, openalex, pubmed, semantic_scholar
 
-__version__ = "1.0.0"
+REGISTRY = {
+    "openalex": openalex,
+    "crossref": crossref,
+    "arxiv": arxiv,
+    "semanticscholar": semantic_scholar,
+    "pubmed": pubmed,
+    "dergipark": dergipark,
+}
+
+ALL_SOURCES = list(REGISTRY.keys())
