@@ -69,6 +69,7 @@ from literature_bot.models import Paper
 from literature_bot.ranking import sort_papers
 from literature_bot.search import run_search
 from literature_bot.sources import ALL_SOURCES
+from literature_bot.sources.crossref import lookup_by_doi
 from literature_bot.synthesis import (
     deep_research_synthesis,
     generate_draft,
@@ -407,6 +408,28 @@ def api_resolve_pdf():
     paper = Paper.from_dict(body.get("paper") or {})
     url, method = resolve_pdf_url(paper, unpaywall_email=os.environ.get("UNPAYWALL_EMAIL"))
     return jsonify({"pdf_url": url, "method": method})
+
+
+@app.route("/api/lookup-doi", methods=["POST"])
+@_json_errors
+def api_lookup_doi():
+    """Convenience for the manual-add-source form: given a DOI (bare, or a
+    full doi.org URL as pasted from a journal page or Google Scholar's
+    "Cite" popup), fetch its title/authors/year/venue/abstract from
+    Crossref so the person doesn't have to type them by hand. Nothing is
+    saved here -- the front end pre-fills the form fields with the result
+    and the person still reviews/edits before clicking "Kütüphaneye Ekle".
+    Journal articles usually have a DOI and this works well for them;
+    theses (e.g. on YÖK Tez) normally don't, so this simply reports
+    not_found and the person fills the form in by hand as before."""
+    body = request.get_json(force=True, silent=True) or {}
+    doi = (body.get("doi") or "").strip()
+    if not doi:
+        return jsonify({"error": "bad_request", "message": "DOI boş olamaz"}), 400
+    paper = lookup_by_doi(doi, email=os.environ.get("OPENALEX_EMAIL"))
+    if paper is None:
+        return jsonify({"error": "not_found", "message": "Bu DOI için kayıt bulunamadı"}), 404
+    return jsonify({"paper": _paper_out(paper)})
 
 
 # ---------------------------------------------------------------------------

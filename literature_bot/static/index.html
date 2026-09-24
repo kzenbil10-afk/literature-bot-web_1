@@ -282,6 +282,17 @@
       <div class="status-line">YÖK Tez Merkezi, Google Scholar veya başka bir sitede bulduğunuz bir makale/tezi
         buradan kütüphanenize ekleyin — taslak oluştururken ve derin sentezde diğer kaynaklarla birlikte kullanılır.</div>
 
+      <label for="manDoi">DOI (varsa) — dergi makalelerinde genelde vardır, tezlerde genelde yoktur</label>
+      <div class="row">
+        <div>
+          <input type="text" id="manDoi" placeholder="örn. 10.1234/abcde veya https://doi.org/10.1234/abcde">
+        </div>
+        <div style="flex: 0 0 auto;">
+          <button class="btn secondary" id="btnDoiLookup" type="button">DOI'den Otomatik Doldur</button>
+        </div>
+      </div>
+      <div id="doiLookupStatus" class="status-line"></div>
+
       <label for="manTitle">Başlık *</label>
       <input type="text" id="manTitle" placeholder="Tez veya makale başlığı">
 
@@ -854,6 +865,39 @@ yardımcısıdır; atıf ve iddiaları orijinal kaynaklarla doğrulayın.</foote
     manualBox.style.display = manualBox.style.display === "none" ? "block" : "none";
   });
 
+  document.getElementById("btnDoiLookup").addEventListener("click", async () => {
+    const doiStatus = document.getElementById("doiLookupStatus");
+    const doi = document.getElementById("manDoi").value.trim();
+    if (!doi) {
+      doiStatus.className = "status-line err";
+      doiStatus.textContent = "Önce bir DOI girin.";
+      return;
+    }
+    const btn = document.getElementById("btnDoiLookup");
+    btn.disabled = true;
+    btn.textContent = "Aranıyor…";
+    doiStatus.className = "status-line";
+    doiStatus.textContent = "";
+    try {
+      const r = await apiJson("/api/lookup-doi", { method: "POST", body: JSON.stringify({ doi }) });
+      const p = r.paper;
+      document.getElementById("manTitle").value = p.title || "";
+      document.getElementById("manAuthors").value = (p.authors || []).join(", ");
+      document.getElementById("manYear").value = p.year || "";
+      document.getElementById("manVenue").value = p.venue || "";
+      document.getElementById("manUrl").value = p.url || "";
+      if (p.abstract) document.getElementById("manAbstract").value = p.abstract;
+      doiStatus.className = "status-line ok";
+      doiStatus.textContent = "Bulundu — alanları kontrol edip düzenleyebilirsiniz.";
+    } catch (e) {
+      doiStatus.className = "status-line err";
+      doiStatus.textContent = e.message || "DOI aranırken bir hata oluştu.";
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "DOI'den Otomatik Doldur";
+    }
+  });
+
   document.getElementById("btnManualSave").addEventListener("click", async () => {
     const statusSpan = document.getElementById("manualAddStatus");
     const title = document.getElementById("manTitle").value.trim();
@@ -885,9 +929,10 @@ yardımcısıdır; atıf ve iddiaları orijinal kaynaklarla doğrulayın.</foote
       });
       statusSpan.className = "status-line ok";
       statusSpan.textContent = `Kaydedildi (id=${r.id}).`;
-      ["manTitle", "manAuthors", "manYear", "manVenue", "manUrl", "manAbstract"].forEach(id => {
+      ["manDoi", "manTitle", "manAuthors", "manYear", "manVenue", "manUrl", "manAbstract"].forEach(id => {
         document.getElementById(id).value = "";
       });
+      document.getElementById("doiLookupStatus").textContent = "";
       refreshLibrary();
     } catch (e) {
       statusSpan.className = "status-line err";

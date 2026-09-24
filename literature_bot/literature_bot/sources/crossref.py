@@ -6,12 +6,15 @@ from __future__ import annotations
 
 import html
 import re
+import urllib.parse
 from typing import List, Optional
 
 from ..models import Paper
 from .base import get_json
 
 BASE_URL = "https://api.crossref.org/works"
+
+_DOI_URL_PREFIX_RE = re.compile(r"^\s*(?:https?://)?(?:dx\.)?doi\.org/", re.IGNORECASE)
 
 
 def _strip_jats(text: Optional[str]) -> Optional[str]:
@@ -25,6 +28,34 @@ def _strip_jats(text: Optional[str]) -> Optional[str]:
     stripped = re.sub(r"<[^>]+>", " ", unescaped)
     cleaned = re.sub(r"\s+", " ", stripped).strip()
     return cleaned or None
+
+
+def _item_to_paper(item: dict) -> Optional[Paper]:
+    titles = item.get("title") or []
+    if not titles:
+        return None
+    authors = []
+    for a in item.get("author", []) or []:
+        name = " ".join(p for p in [a.get("given"), a.get("family")] if p)
+        if name:
+            authors.append(name)
+    year = None
+    issued = (item.get("issued") or {}).get("date-parts") or []
+    if issued and issued[0]:
+        year = issued[0][0]
+    venue_list = item.get("container-title") or []
+
+    return Paper(
+        title=titles[0],
+        authors=authors,
+        year=year,
+        venue=venue_list[0] if venue_list else None,
+        abstract=_strip_jats(item.get("abstract")),
+        doi=item.get("DOI"),
+        url=item.get("URL"),
+        citation_count=item.get("is-referenced-by-count"),
+        source="Crossref",
+    )
 
 
 def search(
@@ -56,31 +87,31 @@ def search(
 
     papers: List[Paper] = []
     for item in data["message"].get("items", []):
-        titles = item.get("title") or []
-        if not titles:
-            continue
-        authors = []
-        for a in item.get("author", []) or []:
-            name = " ".join(p for p in [a.get("given"), a.get("family")] if p)
-            if name:
-                authors.append(name)
-        year = None
-        issued = (item.get("issued") or {}).get("date-parts") or []
-        if issued and issued[0]:
-            year = issued[0][0]
-        venue_list = item.get("container-title") or []
-
-        papers.append(
-            Paper(
-                title=titles[0],
-                authors=authors,
-                year=year,
-                venue=venue_list[0] if venue_list else None,
-                abstract=_strip_jats(item.get("abstract")),
-                doi=item.get("DOI"),
-                url=item.get("URL"),
-                citation_count=item.get("is-referenced-by-count"),
-                source="Crossref",
-            )
-        )
+        p = _item_to_paper(item)
+        if p:
+            papers.append(p)
     return papers
+
+
+def normalize_doi(raw: str) -> str:
+    """Accepts a bare DOI ("10.1234/abc"), a doi.org URL, or either with
+    stray whitespace, and returns the bare DOI. Users pasting from a
+    journal page or Google Scholar's "Cite" popup commonly copy the full
+    URL form, so this is applied before every lookup."""
+    text = (raw or "").strip()
+    text = _DOI_URL_PREFIX_RE.sub("", text)
+    return text.strip().strip("/")
+
+
+def lookup_by_doi(doi: str, email: Optional[str] = None) -> Optional[Paper]:
+    """Fetch a single work's metadata directly by DOI, for the "fill this
+    in from a DOI" convenience on the web app's manual-add-source form --
+    as opposed to search(), which runs a free-text relevance query."""
+    clean = normalize_doi(doi)
+    if not clean:
+        return None
+    params = {"mailto": email} if email else None
+    data = get_json(f"{BASE_URL}/{urllib.parse.quote(clean, safe='')}", params=params)
+    if not data or "message" not in data:
+        return None
+    return _item_to_paper(data["message"])
