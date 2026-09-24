@@ -122,6 +122,20 @@ class _TursoBackend:
     def __init__(self, url: str, auth_token: Optional[str]):
         import libsql_client
 
+        # libsql_client turns a "libsql://" URL into a "wss://" (WebSocket)
+        # connection under the hood. That works fine from most places, but
+        # some hosts' outbound network/proxy setup rejects the WebSocket
+        # upgrade handshake outright ("Invalid response status") even though
+        # plain HTTPS to the same host is fine -- observed on Render's free
+        # tier as of 2026-09-24. Turso serves the same database over both
+        # protocols, so normalizing "libsql://" (and bare "wss://") to
+        # "https://" here sidesteps that class of failure entirely, without
+        # requiring TURSO_DATABASE_URL itself to be re-entered correctly.
+        if url.startswith("libsql://"):
+            url = "https://" + url[len("libsql://"):]
+        elif url.startswith("wss://"):
+            url = "https://" + url[len("wss://"):]
+
         self._client = libsql_client.create_client_sync(url=url, auth_token=auth_token)
         self._client.execute(_SCHEMA_TURSO)
 
