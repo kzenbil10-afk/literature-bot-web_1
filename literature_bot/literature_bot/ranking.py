@@ -9,12 +9,33 @@ from .models import Paper
 
 _STOPWORDS = {
     "the", "a", "an", "of", "and", "or", "in", "on", "for", "to", "with", "is",
-    "ve", "veya", "ile", "için", "bir", "bu", "da", "de", "mi", "mu", "üzerine",
+    "ve", "veya", "ile", "için", "bir", "bu", "şu", "o", "da", "de", "ta", "te",
+    "ki", "mi", "mu", "mı", "mü", "üzerine",
 }
+
+# Turkish possessive/case suffixes commonly glued onto a proper noun after an
+# apostrophe (e.g. "Türkiye'de", "COVID-19'un"). These carry no topical
+# meaning on their own; without stripping them first, the general word-split
+# below turns them into throwaway standalone tokens (e.g. "de") that can
+# spuriously match unrelated documents and dilute the real query terms.
+_TR_APOSTROPHE_SUFFIXES = sorted(
+    {
+        "de", "da", "te", "ta", "nin", "nın", "nun", "nün", "in", "ın", "un", "ün",
+        "ye", "ya", "e", "a", "den", "dan", "ten", "tan", "yi", "yı", "yu", "yü",
+        "i", "ı", "u", "ü", "la", "le", "nda", "nde", "ndan", "nden", "yle", "yla",
+        "nı", "ni", "nu", "nü",
+    },
+    key=len,
+    reverse=True,
+)
+_APOSTROPHE_SUFFIX_RE = re.compile(
+    r"'(?:" + "|".join(_TR_APOSTROPHE_SUFFIXES) + r")\b", re.IGNORECASE
+)
 
 
 def _tokenize(text: str) -> set:
-    words = re.findall(r"[a-zA-ZçğıöşüÇĞİÖŞÜ0-9]+", (text or "").lower())
+    text = _APOSTROPHE_SUFFIX_RE.sub("", text or "")
+    words = re.findall(r"[a-zA-ZçğıöşüÇĞİÖŞÜ0-9]+", text.lower())
     return {w for w in words if w not in _STOPWORDS and len(w) > 1}
 
 
@@ -48,12 +69,20 @@ def score_papers(papers: List[Paper], query: str, weights=None) -> List[Paper]:
         else:
             recency_score = 0.5
 
-        p.score = round(
-            weights["term"] * term_score
-            + weights["citation"] * citation_score
-            + weights["recency"] * recency_score,
-            4,
-        )
+        # Citation count and recency may only ever break ties *among*
+        # topically relevant papers. They must never be able to push a
+        # paper that has no real overlap with the query above -- or even
+        # anywhere near -- one that does, just because it happens to be
+        # well-cited or recent (this was the cause of unrelated-topic
+        # papers, e.g. logistics results for an unemployment query,
+        # outranking genuine matches). So term relevance *gates* the
+        # secondary signals multiplicatively instead of simply being added
+        # to them: zero term overlap -> zero score, full stop.
+        secondary = weights["citation"] * citation_score + weights["recency"] * recency_score
+        if query_terms:
+            p.score = round(weights["term"] * term_score + secondary * term_score, 4)
+        else:
+            p.score = round(weights["term"] * term_score + secondary, 4)
 
     return sorted(papers, key=lambda p: p.score, reverse=True)
 

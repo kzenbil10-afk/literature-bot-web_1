@@ -58,4 +58,19 @@ def run_search(
     raw_total = len(all_papers)
     unique = deduplicate(all_papers)
     ranked = score_papers(unique, query)
+
+    # Drop results that have essentially no real relevance to the query --
+    # these used to survive purely on citation count/recency (see
+    # ranking.py) and show up as e.g. logistics papers for an unemployment
+    # search. Keep a small fallback so a genuinely narrow/niche query still
+    # returns *something* rather than an empty page, instead of silently
+    # padding it out with off-topic results.
+    _MIN_RELEVANCE = 0.10
+    _MIN_FALLBACK = 3
+    relevant = [p for p in ranked if p.score >= _MIN_RELEVANCE]
+    if len(relevant) >= _MIN_FALLBACK or not ranked:
+        ranked = relevant
+    else:
+        ranked = ranked[: max(len(relevant), _MIN_FALLBACK)]
+
     return ranked, counts, raw_total
