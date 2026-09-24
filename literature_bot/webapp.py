@@ -38,6 +38,7 @@ import os
 import shutil
 import tempfile
 import traceback
+from concurrent.futures import ThreadPoolExecutor
 from functools import wraps
 
 from flask import Flask, jsonify, request, send_from_directory
@@ -218,13 +219,25 @@ def api_search():
     )
     ranked = sort_papers(ranked, by=sort_by)[:max_results]
 
+    # translate_papers() and deep_research_synthesis() each make their own
+    # independent NVIDIA/Claude call, and NVIDIA's free tier can take up to
+    # ~90s (bounded retries) per call when it's being slow. They don't depend
+    # on each other's output (translation writes title_tr/abstract_tr; deep
+    # synthesis only reads the original title/abstract), so run them
+    # concurrently instead of back-to-back -- worst case is now ~90s total
+    # instead of ~180s.
     translation_status = None
-    if do_translate:
-        translation_status = translate_papers(ranked)
-
     deep_synthesis = None
-    if do_deep_research:
-        deep_synthesis = deep_research_synthesis(query=query, papers=ranked, language=language)
+    jobs = {}
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        if do_translate:
+            jobs["translate"] = executor.submit(translate_papers, ranked)
+        if do_deep_research:
+            jobs["deep"] = executor.submit(deep_research_synthesis, query=query, papers=ranked, language=language)
+        if "translate" in jobs:
+            translation_status = jobs["translate"].result()
+        if "deep" in jobs:
+            deep_synthesis = jobs["deep"].result()
 
     return jsonify(
         {
