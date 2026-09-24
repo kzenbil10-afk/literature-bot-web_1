@@ -264,10 +264,6 @@ def api_search():
             "unique_total": len(ranked),
             "translation_status": translation_status,
             "deep_synthesis": deep_synthesis,
-            # Temporary debug aid while diagnosing the OpenAI switch-over --
-            # safe to remove once translate/deep_research are confirmed
-            # working reliably.
-            "llm_last_error": llm_client.get_last_error(),
             "papers": [_paper_out(p) for p in ranked],
             "dergipark_warning": (
                 "dergipark" in sources and not os.path.exists(dergipark_db)

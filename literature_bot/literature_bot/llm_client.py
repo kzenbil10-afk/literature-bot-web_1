@@ -108,17 +108,6 @@ _MAX_ATTEMPTS = 3
 # NVIDIA response is usually a sign it's never going to answer at all.
 _OPENAI_REQUEST_TIMEOUT_SECONDS = 75
 
-# Temporary diagnostic aid: chat_complete() never raises (callers rely on
-# that to fall back cleanly), so a caller that wants to know *why* the last
-# call returned None -- e.g. to show it in an API response while debugging a
-# live deployment -- can read this afterwards. Not thread-safe / not meant
-# as a permanent API; safe to ignore.
-_LAST_ERROR: Optional[str] = None
-
-
-def get_last_error() -> Optional[str]:
-    return _LAST_ERROR
-
 
 def _call_anthropic(prompt: str, api_key: str, model: str, max_tokens: int) -> Optional[str]:
     try:
@@ -160,11 +149,9 @@ def _call_openai_compatible(
     so this is gated per-provider via `use_max_completion_tokens` rather
     than switched globally.
     """
-    global _LAST_ERROR
     try:
         from openai import OpenAI
     except ImportError:
-        _LAST_ERROR = "openai package not importable"
         return None
     timeout = _OPENAI_REQUEST_TIMEOUT_SECONDS if use_max_completion_tokens else _REQUEST_TIMEOUT_SECONDS
     client = OpenAI(api_key=api_key, base_url=base_url, timeout=timeout, max_retries=0)
@@ -191,10 +178,8 @@ def _call_openai_compatible(
     for attempt in range(_MAX_ATTEMPTS):
         try:
             resp = client.chat.completions.create(**kwargs)
-            _LAST_ERROR = None
             return resp.choices[0].message.content
-        except Exception as e:
-            _LAST_ERROR = f"{type(e).__name__}: {e}"
+        except Exception:
             if attempt == _MAX_ATTEMPTS - 1:
                 return None
             continue
