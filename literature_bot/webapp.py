@@ -95,6 +95,7 @@ _SOURCE_LABELS_TR = {
     "semanticscholar": "Semantic Scholar",
     "pubmed": "PubMed",
     "dergipark": "DergiPark",
+    "yok_tez": "YÖK Ulusal Tez Merkezi",
 }
 
 APP_PASSWORD = os.environ.get("APP_PASSWORD")
