@@ -120,23 +120,42 @@ def _call_anthropic(prompt: str, api_key: str, model: str, max_tokens: int) -> O
 
 
 def _call_openai_compatible(
-    prompt: str, api_key: str, model: str, max_tokens: int, base_url: Optional[str] = None
+    prompt: str,
+    api_key: str,
+    model: str,
+    max_tokens: int,
+    base_url: Optional[str] = None,
+    use_max_completion_tokens: bool = False,
 ) -> Optional[str]:
     """Shared by "openai" (base_url=None -> api.openai.com) and "nvidia"
-    (base_url=NVIDIA's NIM endpoint) -- both speak the same protocol."""
+    (base_url=NVIDIA's NIM endpoint) -- both speak the same protocol.
+
+    Newer OpenAI models (e.g. gpt-5.6-luna, as of 2026-09) reject the
+    classic `max_tokens` param (must be `max_completion_tokens` instead) and
+    only accept the default `temperature` (1) -- passing 0.4 is a hard
+    error, not just ignored. NVIDIA's NIM-hosted models still expect the
+    classic OpenAI-compatible shape (`max_tokens` + a custom `temperature`),
+    so this is gated per-provider via `use_max_completion_tokens` rather
+    than switched globally.
+    """
     try:
         from openai import OpenAI
     except ImportError:
         return None
     client = OpenAI(api_key=api_key, base_url=base_url, timeout=_REQUEST_TIMEOUT_SECONDS, max_retries=0)
+    kwargs = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+    }
+    if use_max_completion_tokens:
+        kwargs["max_completion_tokens"] = max_tokens
+        # no `temperature` -- these models only support the default (1)
+    else:
+        kwargs["max_tokens"] = max_tokens
+        kwargs["temperature"] = 0.4
     for attempt in range(_MAX_ATTEMPTS):
         try:
-            resp = client.chat.completions.create(
-                model=model,
-                max_tokens=max_tokens,
-                temperature=0.4,
-                messages=[{"role": "user", "content": prompt}],
-            )
+            resp = client.chat.completions.create(**kwargs)
             return resp.choices[0].message.content
         except Exception:
             if attempt == _MAX_ATTEMPTS - 1:
@@ -172,7 +191,10 @@ def chat_complete(
         key = api_key or os.environ.get("OPENAI_API_KEY")
         if not key:
             return None
-        return _call_openai_compatible(prompt, key, model or default_model("openai"), max_tokens)
+        return _call_openai_compatible(
+            prompt, key, model or default_model("openai"), max_tokens,
+            use_max_completion_tokens=True,
+        )
 
     if resolved_provider == "nvidia":
         key = api_key or os.environ.get("NVIDIA_API_KEY")
