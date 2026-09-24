@@ -1,0 +1,23 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# local-only secrets -- never commit
+.env
+
+# local test/CLI-generated artifacts -- never committed (regenerated per run)
+web_library.sqlite3
+library.sqlite3
+
+# the tracked source of truth is dergipark_cache.sqlite3.gz (see webapp.py's
+# _ensure_dergipark_cache); the plain .sqlite3 is decompressed from it at
+# startup and shouldn't be committed itself (too big for GitHub's web upload)
+dergipark_cache.sqlite3
+kutuphane/
+tam_metinler/
+.literature_bot_last_search.json
+literatur_raporu.md
+taslak.md
+taslak_kaynaklar.bib
+kaynaklar.bib

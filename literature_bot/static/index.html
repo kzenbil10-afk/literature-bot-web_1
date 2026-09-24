@@ -1,0 +1,687 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
+<title>Literatür Botu</title>
+<style>
+  :root {
+    --bg: #f4f5f7;
+    --card: #ffffff;
+    --border: #e0e2e6;
+    --text: #1c1e21;
+    --muted: #6b7280;
+    --accent: #2563eb;
+    --accent-dark: #1d4ed8;
+    --green: #16a34a;
+    --red: #dc2626;
+    --radius: 10px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding-bottom: 60px;
+  }
+  header {
+    background: var(--accent);
+    color: white;
+    padding: 14px 16px;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+  header h1 { margin: 0; font-size: 1.15rem; }
+  header .sub { font-size: 0.75rem; opacity: 0.85; margin-top: 2px; }
+
+  nav.tabs {
+    display: flex;
+    background: white;
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 54px;
+    z-index: 9;
+  }
+  nav.tabs button {
+    flex: 1;
+    padding: 12px 4px;
+    border: none;
+    background: none;
+    font-size: 0.85rem;
+    color: var(--muted);
+    border-bottom: 3px solid transparent;
+    cursor: pointer;
+  }
+  nav.tabs button.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+    font-weight: 600;
+  }
+
+  main { max-width: 900px; margin: 0 auto; padding: 14px; }
+  .view { display: none; }
+  .view.active { display: block; }
+
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px;
+    margin-bottom: 12px;
+  }
+
+  label { display: block; font-size: 0.8rem; color: var(--muted); margin: 10px 0 4px; }
+  input[type=text], input[type=number], select, textarea {
+    width: 100%;
+    padding: 9px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 0.95rem;
+    background: white;
+    color: var(--text);
+  }
+  textarea { resize: vertical; font-family: inherit; }
+
+  .row { display: flex; gap: 10px; flex-wrap: wrap; }
+  .row > * { flex: 1; min-width: 120px; }
+
+  .checks { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+  .chk {
+    display: flex; align-items: center; gap: 5px;
+    border: 1px solid var(--border); border-radius: 20px;
+    padding: 5px 10px; font-size: 0.82rem; background: white; cursor: pointer;
+  }
+  .chk input { margin: 0; }
+
+  button.btn {
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 16px;
+    font-size: 0.92rem;
+    cursor: pointer;
+    font-weight: 600;
+  }
+  button.btn:hover { background: var(--accent-dark); }
+  button.btn.secondary { background: #eef1f6; color: var(--text); font-weight: 500; }
+  button.btn.secondary:hover { background: #e2e6ee; }
+  button.btn.small { padding: 6px 10px; font-size: 0.78rem; border-radius: 6px; }
+  button.btn:disabled { opacity: 0.55; cursor: default; }
+  button.btn.danger { background: var(--red); }
+
+  .actions-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; align-items: center; }
+
+  .result-title { font-weight: 600; font-size: 1rem; margin: 0 0 3px; }
+  .result-title-tr { color: var(--accent-dark); font-size: 0.9rem; margin: 0 0 6px; }
+  .meta { font-size: 0.78rem; color: var(--muted); margin-bottom: 6px; }
+  .badges { display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 6px; }
+  .badge {
+    font-size: 0.68rem; background: #eef1f6; color: var(--muted);
+    padding: 2px 8px; border-radius: 10px;
+  }
+  .abstract { font-size: 0.85rem; line-height: 1.4; margin: 4px 0; }
+  .abstract-tr { font-size: 0.85rem; line-height: 1.4; margin: 4px 0; color: #374151; background: #f8fafc; padding: 8px; border-radius: 6px; }
+  .preview-box {
+    font-size: 0.8rem; background: #fffbea; border: 1px solid #fde68a;
+    padding: 8px; border-radius: 6px; margin-top: 8px; white-space: pre-wrap;
+  }
+  .status-line { font-size: 0.8rem; color: var(--muted); margin: 6px 0; }
+  .status-line.ok { color: var(--green); }
+  .status-line.err { color: var(--red); }
+
+  .spinner {
+    display: inline-block; width: 14px; height: 14px;
+    border: 2px solid rgba(0,0,0,0.15); border-top-color: var(--accent);
+    border-radius: 50%; animation: spin 0.7s linear infinite; vertical-align: middle;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .empty { color: var(--muted); font-size: 0.9rem; text-align: center; padding: 30px 10px; }
+
+  .save-inline { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
+  .save-inline input[type=text] { width: 140px; flex: none; }
+  .save-inline label.chk { margin: 0; }
+
+  footer.note { text-align: center; font-size: 0.72rem; color: var(--muted); padding: 20px 10px; }
+
+  pre.draft-output {
+    white-space: pre-wrap; font-family: ui-monospace, monospace; font-size: 0.82rem;
+    background: #0f172a; color: #e2e8f0; padding: 14px; border-radius: 8px;
+    max-height: 480px; overflow: auto;
+  }
+
+  @media (max-width: 480px) {
+    header h1 { font-size: 1rem; }
+    .row > * { min-width: 100%; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>📚 Literatür Botu</h1>
+  <div class="sub" id="headerSub">OpenAlex · Crossref · arXiv · Semantic Scholar · PubMed · DergiPark</div>
+</header>
+
+<nav class="tabs">
+  <button data-tab="search" class="active">Ara</button>
+  <button data-tab="library">Kütüphanem</button>
+  <button data-tab="draft">Taslak Oluştur</button>
+</nav>
+
+<main>
+
+  <!-- ================= SEARCH TAB ================= -->
+  <section class="view active" id="view-search">
+    <div class="card">
+      <label for="q">Araştırma konusu</label>
+      <input type="text" id="q" placeholder="örn. eğitimde yapay zeka kullanımı">
+
+      <label>Kaynaklar</label>
+      <div class="checks" id="sourceChecks"></div>
+
+      <div class="row">
+        <div>
+          <label for="yearMin">Yıl (min)</label>
+          <input type="number" id="yearMin" placeholder="örn. 2015">
+        </div>
+        <div>
+          <label for="yearMax">Yıl (max)</label>
+          <input type="number" id="yearMax" placeholder="örn. 2026">
+        </div>
+        <div>
+          <label for="sortBy">Sırala</label>
+          <select id="sortBy">
+            <option value="relevance">İlgi</option>
+            <option value="citations">Atıf sayısı</option>
+            <option value="year">Yıl</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="checks">
+        <label class="chk"><input type="checkbox" id="optTranslate" checked> Otomatik Türkçe çeviri</label>
+        <label class="chk"><input type="checkbox" id="optDeep"> Derin sentez (LLM)</label>
+      </div>
+
+      <div class="actions-row">
+        <button class="btn" id="btnSearch">Ara</button>
+        <span id="searchStatus" class="status-line"></span>
+      </div>
+    </div>
+
+    <div id="deepSynthesisBox"></div>
+    <div id="results"></div>
+  </section>
+
+  <!-- ================= LIBRARY TAB ================= -->
+  <section class="view" id="view-library">
+    <div class="card">
+      <div class="row">
+        <div>
+          <label for="libCollection">Koleksiyon</label>
+          <select id="libCollection"><option value="">(hepsi)</option></select>
+        </div>
+      </div>
+      <div class="actions-row">
+        <button class="btn secondary" id="btnRefreshLibrary">Yenile</button>
+        <span id="libraryStatus" class="status-line"></span>
+      </div>
+    </div>
+    <div id="libraryList"></div>
+  </section>
+
+  <!-- ================= DRAFT TAB ================= -->
+  <section class="view" id="view-draft">
+    <div class="card">
+      <label for="draftCollection">Koleksiyon</label>
+      <select id="draftCollection"><option value="">(kütüphanedeki hepsi)</option></select>
+
+      <label for="draftTitle">Başlık (opsiyonel)</label>
+      <input type="text" id="draftTitle" placeholder="örn. Eğitimde Yapay Zeka Kullanımı">
+
+      <div class="row">
+        <div>
+          <label for="draftType">Tür</label>
+          <select id="draftType">
+            <option value="article">Makale</option>
+            <option value="thesis">Tez bölümü</option>
+          </select>
+        </div>
+        <div>
+          <label for="draftLang">Dil</label>
+          <select id="draftLang">
+            <option value="tr">Türkçe</option>
+            <option value="en">İngilizce</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="actions-row">
+        <button class="btn" id="btnDraft">Taslak Oluştur</button>
+        <span id="draftStatus" class="status-line"></span>
+      </div>
+    </div>
+    <div id="draftOutput"></div>
+  </section>
+
+</main>
+
+<footer class="note">Literatür Botu — kişisel kullanım için. Çeviriler ve taslaklar bir okuma/başlangıç
+yardımcısıdır; atıf ve iddiaları orijinal kaynaklarla doğrulayın.</footer>
+
+<script>
+(function () {
+  "use strict";
+
+  const state = {
+    lastResults: JSON.parse(localStorage.getItem("litbot_last_results") || "[]"),
+    lastQuery: localStorage.getItem("litbot_last_query") || "",
+  };
+
+  // ---------------------------------------------------------------------
+  // fetch wrapper: attaches the optional password header, and if the
+  // server replies 401 (APP_PASSWORD is set and we don't have it / have the
+  // wrong one), prompts once and retries.
+  // ---------------------------------------------------------------------
+  async function api(path, opts = {}) {
+    opts.headers = Object.assign({ "Content-Type": "application/json" }, opts.headers || {});
+    const stored = localStorage.getItem("litbot_pw");
+    if (stored) opts.headers["X-App-Password"] = stored;
+
+    let resp = await fetch(path, opts);
+    if (resp.status === 401) {
+      const pw = window.prompt("Bu uygulama şifre korumalı. Şifreyi girin:");
+      if (pw) {
+        localStorage.setItem("litbot_pw", pw);
+        opts.headers["X-App-Password"] = pw;
+        resp = await fetch(path, opts);
+      }
+    }
+    return resp;
+  }
+
+  async function apiJson(path, opts) {
+    const resp = await api(path, opts);
+    let data;
+    try { data = await resp.json(); } catch (e) { data = null; }
+    if (!resp.ok) {
+      const msg = (data && (data.message || data.error)) || `HTTP ${resp.status}`;
+      throw new Error(msg);
+    }
+    return data;
+  }
+
+  function el(tag, attrs, children) {
+    const e = document.createElement(tag);
+    if (attrs) for (const k in attrs) {
+      if (k === "class") e.className = attrs[k];
+      else if (k === "html") e.innerHTML = attrs[k];
+      else e.setAttribute(k, attrs[k]);
+    }
+    (children || []).forEach(c => { if (c) e.appendChild(c); });
+    return e;
+  }
+  function txt(t) { return document.createTextNode(t); }
+
+  // ---------------------------------------------------------------------
+  // tabs
+  // ---------------------------------------------------------------------
+  document.querySelectorAll("nav.tabs button").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll("nav.tabs button").forEach(b => b.classList.remove("active"));
+      document.querySelectorAll(".view").forEach(v => v.classList.remove("active"));
+      btn.classList.add("active");
+      document.getElementById("view-" + btn.dataset.tab).classList.add("active");
+      if (btn.dataset.tab === "library") refreshLibrary();
+      if (btn.dataset.tab === "draft") refreshCollections();
+    });
+  });
+
+  // ---------------------------------------------------------------------
+  // health / sources
+  // ---------------------------------------------------------------------
+  let ALL_SOURCES = [];
+  async function loadHealth() {
+    try {
+      const h = await apiJson("/api/health");
+      ALL_SOURCES = h.sources || [];
+      const box = document.getElementById("sourceChecks");
+      box.innerHTML = "";
+      ALL_SOURCES.forEach(s => {
+        const id = "src_" + s.id;
+        const label = el("label", { class: "chk", for: id }, [
+          el("input", { type: "checkbox", id, value: s.id, checked: "checked" }),
+          txt(s.label),
+        ]);
+        box.appendChild(label);
+      });
+      const sub = document.getElementById("headerSub");
+      const providerTxt = h.llm_provider ? `LLM: ${h.llm_provider}` : "LLM yapılandırılmadı (kural tabanlı moda düşülecek)";
+      sub.textContent = `${providerTxt} · depolama: ${h.storage}`;
+    } catch (e) {
+      document.getElementById("headerSub").textContent = "Sunucuya bağlanılamadı: " + e.message;
+    }
+  }
+
+  function selectedSources() {
+    return Array.from(document.querySelectorAll("#sourceChecks input:checked")).map(i => i.value);
+  }
+
+  // ---------------------------------------------------------------------
+  // SEARCH
+  // ---------------------------------------------------------------------
+  function paperCard(p, idx) {
+    const title = el("div", { class: "result-title" }, [txt(p.title || "(başlıksız)")]);
+    const children = [title];
+    if (p.title_tr) children.push(el("div", { class: "result-title-tr" }, [txt("🇹🇷 " + p.title_tr)]));
+
+    const authors = (p.authors || []).slice(0, 6).join(", ") + ((p.authors || []).length > 6 ? " ve diğerleri" : "");
+    const meta = `${authors || "Yazar bilinmiyor"} · ${p.year || "yıl yok"} · ${p.venue || ""}`;
+    children.push(el("div", { class: "meta" }, [txt(meta)]));
+
+    const badges = el("div", { class: "badges" });
+    (p.sources && p.sources.length ? p.sources : [p.source]).forEach(s => {
+      if (s) badges.appendChild(el("span", { class: "badge" }, [txt(s)]));
+    });
+    if (p.citation_count != null) badges.appendChild(el("span", { class: "badge" }, [txt(p.citation_count + " atıf")]));
+    children.push(badges);
+
+    if (p.abstract) children.push(el("div", { class: "abstract" }, [txt(p.abstract.slice(0, 500) + (p.abstract.length > 500 ? "…" : ""))]));
+    if (p.abstract_tr) children.push(el("div", { class: "abstract-tr" }, [txt("🇹🇷 " + p.abstract_tr.slice(0, 500))]));
+
+    const previewBoxHolder = el("div", { class: "preview-holder" });
+
+    const btnPreview = el("button", { class: "btn secondary small" }, [txt("Önizle (PDF)")]);
+    const btnPdf = el("button", { class: "btn secondary small" }, [txt("PDF Aç / İndir")]);
+    const btnSave = el("button", { class: "btn small" }, [txt("Kütüphaneye Kaydet")]);
+
+    const collInput = el("input", { type: "text", value: "genel", placeholder: "koleksiyon" });
+    const dlChk = el("input", { type: "checkbox" });
+    const saveRow = el("div", { class: "save-inline" }, [
+      collInput,
+      el("label", { class: "chk" }, [dlChk, txt("tam metni indir")]),
+      btnSave,
+    ]);
+
+    const statusSpan = el("span", { class: "status-line" }, []);
+
+    btnPreview.addEventListener("click", async () => {
+      btnPreview.disabled = true;
+      btnPreview.textContent = "Önizleniyor…";
+      previewBoxHolder.innerHTML = "";
+      try {
+        const r = await apiJson("/api/preview", { method: "POST", body: JSON.stringify({ paper: p }) });
+        const up = r.paper;
+        if (up.preview_available) {
+          previewBoxHolder.appendChild(el("div", { class: "preview-box" }, [txt(up.preview_text || "")]));
+        } else {
+          previewBoxHolder.appendChild(el("div", { class: "status-line err" }, [txt("Önizleme yok: " + (up.preview_reason || "bilinmiyor"))]));
+        }
+      } catch (e) {
+        previewBoxHolder.appendChild(el("div", { class: "status-line err" }, [txt("Hata: " + e.message)]));
+      } finally {
+        btnPreview.disabled = false;
+        btnPreview.textContent = "Önizle (PDF)";
+      }
+    });
+
+    btnPdf.addEventListener("click", async () => {
+      if (p.pdf_url) { window.open(p.pdf_url, "_blank"); return; }
+      btnPdf.disabled = true;
+      btnPdf.textContent = "Aranıyor…";
+      try {
+        const r = await apiJson("/api/resolve-pdf", { method: "POST", body: JSON.stringify({ paper: p }) });
+        if (r.pdf_url) window.open(r.pdf_url, "_blank");
+        else statusSpan.textContent = "PDF bulunamadı.";
+      } catch (e) {
+        statusSpan.textContent = "Hata: " + e.message;
+      } finally {
+        btnPdf.disabled = false;
+        btnPdf.textContent = "PDF Aç / İndir";
+      }
+    });
+
+    btnSave.addEventListener("click", async () => {
+      btnSave.disabled = true;
+      btnSave.textContent = "Kaydediliyor…";
+      statusSpan.className = "status-line";
+      statusSpan.textContent = "";
+      try {
+        const r = await apiJson("/api/save", {
+          method: "POST",
+          body: JSON.stringify({ paper: p, collection: collInput.value || "genel", download: dlChk.checked }),
+        });
+        statusSpan.className = "status-line ok";
+        statusSpan.textContent = `Kaydedildi (id=${r.id}${dlChk.checked ? ", tam metin: " + r.fulltext_status : ""})`;
+      } catch (e) {
+        statusSpan.className = "status-line err";
+        statusSpan.textContent = "Hata: " + e.message;
+      } finally {
+        btnSave.disabled = false;
+        btnSave.textContent = "Kütüphaneye Kaydet";
+      }
+    });
+
+    const actions = el("div", { class: "actions-row" }, [btnPreview, btnPdf]);
+
+    const card = el("div", { class: "card" }, children);
+    card.appendChild(actions);
+    card.appendChild(previewBoxHolder);
+    card.appendChild(saveRow);
+    card.appendChild(statusSpan);
+    return card;
+  }
+
+  function renderResults(papers, deepSynthesis) {
+    const box = document.getElementById("results");
+    box.innerHTML = "";
+    const synBox = document.getElementById("deepSynthesisBox");
+    synBox.innerHTML = "";
+    if (deepSynthesis) {
+      synBox.appendChild(el("div", { class: "card" }, [
+        el("div", { class: "result-title" }, [txt("Derin Sentez")]),
+        el("div", { class: "abstract", html: mdToHtmlLite(deepSynthesis) }),
+      ]));
+    }
+    if (!papers.length) {
+      box.appendChild(el("div", { class: "empty" }, [txt("Sonuç bulunamadı.")]));
+      return;
+    }
+    papers.forEach((p, i) => box.appendChild(paperCard(p, i)));
+  }
+
+  function mdToHtmlLite(md) {
+    return (md || "")
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/^### (.*)$/gm, "<b>$1</b>")
+      .replace(/^## (.*)$/gm, "<b style='font-size:1.05em'>$1</b>")
+      .replace(/\n{2,}/g, "</p><p>")
+      .replace(/\n/g, "<br>");
+  }
+
+  document.getElementById("btnSearch").addEventListener("click", async () => {
+    const q = document.getElementById("q").value.trim();
+    const statusEl = document.getElementById("searchStatus");
+    if (!q) { statusEl.textContent = "Lütfen bir konu yazın."; statusEl.className = "status-line err"; return; }
+    const sources = selectedSources();
+    if (!sources.length) { statusEl.textContent = "En az bir kaynak seçin."; statusEl.className = "status-line err"; return; }
+
+    const btn = document.getElementById("btnSearch");
+    btn.disabled = true;
+    statusEl.className = "status-line";
+    statusEl.innerHTML = '<span class="spinner"></span> Taranıyor… (birkaç kaynak + çeviri/sentez isteniyorsa biraz sürebilir)';
+    document.getElementById("results").innerHTML = "";
+    document.getElementById("deepSynthesisBox").innerHTML = "";
+
+    try {
+      const body = {
+        query: q,
+        sources,
+        year_min: document.getElementById("yearMin").value || null,
+        year_max: document.getElementById("yearMax").value || null,
+        sort: document.getElementById("sortBy").value,
+        translate: document.getElementById("optTranslate").checked,
+        deep_research: document.getElementById("optDeep").checked,
+      };
+      const r = await apiJson("/api/search", { method: "POST", body: JSON.stringify(body) });
+      state.lastResults = r.papers;
+      state.lastQuery = q;
+      localStorage.setItem("litbot_last_results", JSON.stringify(r.papers));
+      localStorage.setItem("litbot_last_query", q);
+
+      let statusMsg = `${r.unique_total} sonuç (ham: ${r.raw_total})`;
+      if (r.translation_status) statusMsg += ` · çeviri: ${r.translation_status.translated || 0} çevrildi`;
+      if (r.dergipark_warning) statusMsg += " · [uyarı] DergiPark önbelleği bulunamadı";
+      statusEl.className = "status-line ok";
+      statusEl.textContent = statusMsg;
+
+      renderResults(r.papers, r.deep_synthesis);
+    } catch (e) {
+      statusEl.className = "status-line err";
+      statusEl.textContent = "Hata: " + e.message;
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  // restore last results on load
+  if (state.lastResults.length) {
+    document.getElementById("q").value = state.lastQuery;
+    renderResults(state.lastResults, null);
+    document.getElementById("searchStatus").textContent = `(önceki arama sonuçları gösteriliyor: "${state.lastQuery}")`;
+  }
+
+  // ---------------------------------------------------------------------
+  // LIBRARY
+  // ---------------------------------------------------------------------
+  async function refreshCollectionsList(selectId) {
+    try {
+      const r = await apiJson("/api/collections");
+      const sel = document.getElementById(selectId);
+      const current = sel.value;
+      sel.innerHTML = "";
+      sel.appendChild(el("option", { value: "" }, [txt(selectId === "libCollection" ? "(hepsi)" : "(kütüphanedeki hepsi)")]));
+      (r.collections || []).forEach(c => sel.appendChild(el("option", { value: c }, [txt(c)])));
+      if ((r.collections || []).includes(current)) sel.value = current;
+    } catch (e) { /* ignore */ }
+  }
+  function refreshCollections() {
+    refreshCollectionsList("libCollection");
+    refreshCollectionsList("draftCollection");
+  }
+
+  function libraryItemCard(e) {
+    const p = e.paper;
+    const title = el("div", { class: "result-title" }, [txt(p.title || "(başlıksız)")]);
+    const meta = el("div", { class: "meta" }, [txt(
+      `${p.first_author_surname ? "" : ""}${(p.authors||[])[0] || "?"} (${p.year || "t.y."}) · koleksiyon: ${e.collection} · kaydedilme: ${(e.saved_at||"").slice(0,16).replace("T"," ")}`
+    )]);
+    const badges = el("div", { class: "badges" }, []);
+    let ftLabel = "tam metin yok";
+    if (p.fulltext_status === "ok") ftLabel = `tam metin var (${p.fulltext_chars || "?"} karakter)`;
+    else if (p.fulltext_status === "pdf_only") ftLabel = "sadece PDF (metin çıkarılamadı)";
+    else if (p.fulltext_status === "unavailable") ftLabel = "tam metin bulunamadı";
+    badges.appendChild(el("span", { class: "badge" }, [txt(ftLabel)]));
+
+    const btnDel = el("button", { class: "btn danger small" }, [txt("Kütüphaneden Sil")]);
+    const statusSpan = el("span", { class: "status-line" }, []);
+    btnDel.addEventListener("click", async () => {
+      if (!confirm("Bu kaynağı kütüphaneden silmek istediğinize emin misiniz?")) return;
+      btnDel.disabled = true;
+      try {
+        await apiJson(`/api/library/${e.id}`, { method: "DELETE" });
+        card.remove();
+      } catch (err) {
+        statusSpan.className = "status-line err";
+        statusSpan.textContent = "Hata: " + err.message;
+        btnDel.disabled = false;
+      }
+    });
+
+    const card = el("div", { class: "card" }, [title, meta, badges, el("div", { class: "actions-row" }, [btnDel, statusSpan])]);
+    return card;
+  }
+
+  async function refreshLibrary() {
+    const status = document.getElementById("libraryStatus");
+    status.textContent = "Yükleniyor…";
+    const box = document.getElementById("libraryList");
+    box.innerHTML = "";
+    await refreshCollectionsList("libCollection");
+    try {
+      const collection = document.getElementById("libCollection").value;
+      const qs = collection ? `?collection=${encodeURIComponent(collection)}` : "";
+      const r = await apiJson("/api/library" + qs);
+      status.textContent = `${r.entries.length} kayıt`;
+      if (!r.entries.length) {
+        box.appendChild(el("div", { class: "empty" }, [txt("Bu koleksiyonda henüz kaydedilmiş kaynak yok.")]));
+        return;
+      }
+      r.entries.forEach(e => box.appendChild(libraryItemCard(e)));
+    } catch (e) {
+      status.className = "status-line err";
+      status.textContent = "Hata: " + e.message;
+    }
+  }
+  document.getElementById("btnRefreshLibrary").addEventListener("click", refreshLibrary);
+  document.getElementById("libCollection").addEventListener("change", refreshLibrary);
+
+  // ---------------------------------------------------------------------
+  // DRAFT
+  // ---------------------------------------------------------------------
+  function downloadBlob(filename, content, mime) {
+    const blob = new Blob([content], { type: mime });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+
+  document.getElementById("btnDraft").addEventListener("click", async () => {
+    const status = document.getElementById("draftStatus");
+    const out = document.getElementById("draftOutput");
+    const btn = document.getElementById("btnDraft");
+    out.innerHTML = "";
+    btn.disabled = true;
+    status.className = "status-line";
+    status.innerHTML = '<span class="spinner"></span> Taslak oluşturuluyor… (LLM ile sentez isteniyorsa biraz sürebilir)';
+    try {
+      const body = {
+        collection: document.getElementById("draftCollection").value || null,
+        title: document.getElementById("draftTitle").value || null,
+        doc_type: document.getElementById("draftType").value,
+        language: document.getElementById("draftLang").value,
+      };
+      const r = await apiJson("/api/draft", { method: "POST", body: JSON.stringify(body) });
+      status.className = "status-line ok";
+      status.textContent = `Hazır (${r.n_sources} kaynak, ${r.n_with_fulltext} tanesi tam metinle) · ${r.used_llm ? "LLM sentezi" : "kural tabanlı iskelet (LLM yapılandırılmadı)"}`;
+
+      const btnMd = el("button", { class: "btn secondary small" }, [txt("taslak.md indir")]);
+      const btnBib = el("button", { class: "btn secondary small" }, [txt("kaynaklar.bib indir")]);
+      btnMd.addEventListener("click", () => downloadBlob("taslak.md", r.draft_markdown, "text/markdown"));
+      btnBib.addEventListener("click", () => downloadBlob("kaynaklar.bib", r.bibtex, "text/plain"));
+
+      out.appendChild(el("div", { class: "card" }, [
+        el("div", { class: "actions-row" }, [btnMd, btnBib]),
+        el("pre", { class: "draft-output" }, [txt(r.draft_markdown)]),
+      ]));
+    } catch (e) {
+      status.className = "status-line err";
+      status.textContent = "Hata: " + e.message;
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  loadHealth();
+  refreshCollections();
+})();
+</script>
+</body>
+</html>

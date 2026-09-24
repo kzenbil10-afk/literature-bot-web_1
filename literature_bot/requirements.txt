@@ -1,0 +1,40 @@
+# --- Web uygulaması (webapp.py) ve CLI'nin ortak bağımlılıkları ---
+# Render (veya başka bir host) `pip install -r requirements.txt` çalıştırdığında
+# hepsi tek seferde kurulur; ekstra bir kurulum adımı gerekmez.
+
+requests>=2.31
+
+# Web uygulaması sunucusu (yalnızca `python -m literature_bot ...` CLI'sini
+# kullanıyorsanız bunlara ihtiyacınız yok, ama zararı da yok):
+flask>=3.0
+gunicorn>=22.0
+
+# LLM sağlayıcıları -- --deep-research, draft komutu ve en yüksek kaliteli
+# otomatik çeviri için. NVIDIA NIM (NVIDIA_API_KEY) OpenAI-uyumlu bir API
+# kullandığı için `openai` paketine ihtiyaç duyar; Claude (ANTHROPIC_API_KEY)
+# `anthropic` paketine. İkisini de kurmak zararsız -- hangi anahtarı
+# ayarlarsanız o kullanılır (literature_bot/llm_client.py).
+openai>=1.30
+anthropic>=0.34
+
+# Hiçbir LLM sağlayıcısı yokken otomatik Türkçe çeviri için (ücretsiz/keyless
+# yedek motor).
+deep-translator>=1.11
+
+# PDF tam metin indirme + metin çıkarma (önizleme ve save --download / web
+# uygulamasında "tam metni indir" için).
+pypdf>=3.17
+pymupdf>=1.23
+
+# Metin katmanı bozuk çıkan PDF'lerde (bazı DergiPark makaleleri) OCR
+# yedeği için. Sisteme ayrıca `tesseract` binary'si kurulu değilse (örn.
+# Render'ın varsayılan Python ortamında kurulu DEĞİLDİR) bu adım sessizce
+# atlanır -- metin katmanı çıkarımı yine çalışmaya devam eder, sadece OCR
+# yedeği kullanılamaz.
+pytesseract>=0.3
+pillow>=10.0
+
+# Web uygulamasının kalıcı kütüphane depolaması için (Turso). TURSO_DATABASE_URL
+# ortam değişkeni ayarlanmadıysa hiç kullanılmaz (yerel sqlite'a düşülür), o
+# yüzden yerel CLI kullanımını etkilemez.
+libsql-client>=0.3
