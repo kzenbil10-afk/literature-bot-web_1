@@ -17,6 +17,12 @@ connect() time:
 
 Both backends expose the exact same small API, so webapp.py never needs to
 know or care which one is active.
+
+Multi-user note (added 2026-09-24): each saved paper now carries an `owner`
+(the username that saved it), and every read/write is scoped to a single
+owner so several people can share one deployment/database while each only
+ever sees their own library. A small `users` table holds username +
+password hash for the simple built-in login (see webapp.py's /api/auth/*).
 """
 from __future__ import annotations
 
@@ -36,7 +42,8 @@ CREATE TABLE IF NOT EXISTS saved_papers (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     collection TEXT NOT NULL DEFAULT 'genel',
     saved_at TEXT NOT NULL,
-    paper_json TEXT NOT NULL
+    paper_json TEXT NOT NULL,
+    owner TEXT NOT NULL DEFAULT ''
 );
 """
 
@@ -45,6 +52,23 @@ CREATE TABLE IF NOT EXISTS saved_papers (
 # from Python ourselves for both backends -- one less thing that could behave
 # subtly differently between the two.
 _SCHEMA_TURSO = _SCHEMA_SQLITE
+
+_SCHEMA_USERS = """
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+"""
+
+# Deployments created before the multi-user feature already have a
+# saved_papers table without the `owner` column. CREATE TABLE IF NOT EXISTS
+# won't add it to an existing table, so we try an explicit ALTER TABLE once
+# at backend startup and just ignore the error it raises on every later
+# startup once the column already exists (there's no portable
+# "ADD COLUMN IF NOT EXISTS" in SQLite/libSQL).
+_ADD_OWNER_COLUMN_SQL = "ALTER TABLE saved_papers ADD COLUMN owner TEXT NOT NULL DEFAULT ''"
 
 
 def _paper_to_json(paper: Paper) -> str:
@@ -69,48 +93,92 @@ class _SqliteBackend:
     def __init__(self, db_path: str = DEFAULT_DB_PATH):
         self.con = sqlite3.connect(db_path, check_same_thread=False)
         self.con.executescript(_SCHEMA_SQLITE)
+        self.con.executescript(_SCHEMA_USERS)
+        cols = [r[1] for r in self.con.execute("PRAGMA table_info(saved_papers)").fetchall()]
+        if "owner" not in cols:
+            self.con.execute(_ADD_OWNER_COLUMN_SQL)
         self.con.commit()
 
-    def save_paper(self, paper: Paper, collection: str) -> int:
+    def save_paper(self, paper: Paper, collection: str, owner: str = "") -> int:
         cur = self.con.execute(
-            "INSERT INTO saved_papers (collection, saved_at, paper_json) VALUES (?, ?, ?)",
-            (collection, _now_iso(), _paper_to_json(paper)),
+            "INSERT INTO saved_papers (collection, saved_at, paper_json, owner) VALUES (?, ?, ?, ?)",
+            (collection, _now_iso(), _paper_to_json(paper), owner),
         )
         self.con.commit()
         return cur.lastrowid
 
-    def list_papers(self, collection: Optional[str] = None) -> List[dict]:
+    def list_papers(self, collection: Optional[str] = None, owner: Optional[str] = None) -> List[dict]:
+        conds, params = [], []
         if collection:
-            rows = self.con.execute(
-                "SELECT id, collection, saved_at, paper_json FROM saved_papers WHERE collection = ? ORDER BY id DESC",
-                (collection,),
-            ).fetchall()
-        else:
-            rows = self.con.execute(
-                "SELECT id, collection, saved_at, paper_json FROM saved_papers ORDER BY id DESC"
-            ).fetchall()
+            conds.append("collection = ?")
+            params.append(collection)
+        if owner is not None:
+            conds.append("owner = ?")
+            params.append(owner)
+        where = ("WHERE " + " AND ".join(conds)) if conds else ""
+        rows = self.con.execute(
+            f"SELECT id, collection, saved_at, paper_json FROM saved_papers {where} ORDER BY id DESC",
+            params,
+        ).fetchall()
         return [
             {"id": r[0], "collection": r[1], "saved_at": r[2], "paper": _paper_from_json(r[3])}
             for r in rows
         ]
 
-    def get_paper(self, saved_id: int) -> Optional[dict]:
-        row = self.con.execute(
-            "SELECT id, collection, saved_at, paper_json FROM saved_papers WHERE id = ?",
-            (saved_id,),
-        ).fetchone()
+    def get_paper(self, saved_id: int, owner: Optional[str] = None) -> Optional[dict]:
+        if owner is not None:
+            row = self.con.execute(
+                "SELECT id, collection, saved_at, paper_json FROM saved_papers WHERE id = ? AND owner = ?",
+                (saved_id, owner),
+            ).fetchone()
+        else:
+            row = self.con.execute(
+                "SELECT id, collection, saved_at, paper_json FROM saved_papers WHERE id = ?",
+                (saved_id,),
+            ).fetchone()
         if not row:
             return None
         return {"id": row[0], "collection": row[1], "saved_at": row[2], "paper": _paper_from_json(row[3])}
 
-    def remove_paper(self, saved_id: int) -> bool:
-        cur = self.con.execute("DELETE FROM saved_papers WHERE id = ?", (saved_id,))
+    def remove_paper(self, saved_id: int, owner: Optional[str] = None) -> bool:
+        if owner is not None:
+            cur = self.con.execute(
+                "DELETE FROM saved_papers WHERE id = ? AND owner = ?", (saved_id, owner)
+            )
+        else:
+            cur = self.con.execute("DELETE FROM saved_papers WHERE id = ?", (saved_id,))
         self.con.commit()
         return cur.rowcount > 0
 
-    def list_collections(self) -> List[str]:
-        rows = self.con.execute("SELECT DISTINCT collection FROM saved_papers ORDER BY collection").fetchall()
+    def list_collections(self, owner: Optional[str] = None) -> List[str]:
+        if owner is not None:
+            rows = self.con.execute(
+                "SELECT DISTINCT collection FROM saved_papers WHERE owner = ? ORDER BY collection", (owner,)
+            ).fetchall()
+        else:
+            rows = self.con.execute("SELECT DISTINCT collection FROM saved_papers ORDER BY collection").fetchall()
         return [r[0] for r in rows]
+
+    def create_user(self, username: str, password_hash: str) -> int:
+        cur = self.con.execute(
+            "INSERT INTO users (username, password_hash, created_at) VALUES (?, ?, ?)",
+            (username, password_hash, _now_iso()),
+        )
+        self.con.commit()
+        return cur.lastrowid
+
+    def get_user(self, username: str) -> Optional[dict]:
+        row = self.con.execute(
+            "SELECT id, username, password_hash, created_at FROM users WHERE username = ?", (username,)
+        ).fetchone()
+        if not row:
+            return None
+        return {"id": row[0], "username": row[1], "password_hash": row[2], "created_at": row[3]}
+
+    def delete_user(self, username: str) -> bool:
+        cur = self.con.execute("DELETE FROM users WHERE username = ?", (username,))
+        self.con.commit()
+        return cur.rowcount > 0
 
 
 class _TursoBackend:
@@ -138,46 +206,90 @@ class _TursoBackend:
 
         self._client = libsql_client.create_client_sync(url=url, auth_token=auth_token)
         self._client.execute(_SCHEMA_TURSO)
+        self._client.execute(_SCHEMA_USERS)
+        try:
+            self._client.execute(_ADD_OWNER_COLUMN_SQL)
+        except Exception:
+            pass  # column already exists from a previous deploy -- fine.
 
-    def save_paper(self, paper: Paper, collection: str) -> int:
+    def save_paper(self, paper: Paper, collection: str, owner: str = "") -> int:
         rs = self._client.execute(
-            "INSERT INTO saved_papers (collection, saved_at, paper_json) VALUES (?, ?, ?) RETURNING id",
-            [collection, _now_iso(), _paper_to_json(paper)],
+            "INSERT INTO saved_papers (collection, saved_at, paper_json, owner) VALUES (?, ?, ?, ?) RETURNING id",
+            [collection, _now_iso(), _paper_to_json(paper), owner],
         )
         return int(rs.rows[0][0])
 
-    def list_papers(self, collection: Optional[str] = None) -> List[dict]:
+    def list_papers(self, collection: Optional[str] = None, owner: Optional[str] = None) -> List[dict]:
+        conds, params = [], []
         if collection:
-            rs = self._client.execute(
-                "SELECT id, collection, saved_at, paper_json FROM saved_papers WHERE collection = ? ORDER BY id DESC",
-                [collection],
-            )
-        else:
-            rs = self._client.execute(
-                "SELECT id, collection, saved_at, paper_json FROM saved_papers ORDER BY id DESC"
-            )
+            conds.append("collection = ?")
+            params.append(collection)
+        if owner is not None:
+            conds.append("owner = ?")
+            params.append(owner)
+        where = ("WHERE " + " AND ".join(conds)) if conds else ""
+        rs = self._client.execute(
+            f"SELECT id, collection, saved_at, paper_json FROM saved_papers {where} ORDER BY id DESC",
+            params,
+        )
         return [
             {"id": r[0], "collection": r[1], "saved_at": r[2], "paper": _paper_from_json(r[3])}
             for r in rs.rows
         ]
 
-    def get_paper(self, saved_id: int) -> Optional[dict]:
-        rs = self._client.execute(
-            "SELECT id, collection, saved_at, paper_json FROM saved_papers WHERE id = ?",
-            [saved_id],
-        )
+    def get_paper(self, saved_id: int, owner: Optional[str] = None) -> Optional[dict]:
+        if owner is not None:
+            rs = self._client.execute(
+                "SELECT id, collection, saved_at, paper_json FROM saved_papers WHERE id = ? AND owner = ?",
+                [saved_id, owner],
+            )
+        else:
+            rs = self._client.execute(
+                "SELECT id, collection, saved_at, paper_json FROM saved_papers WHERE id = ?",
+                [saved_id],
+            )
         if not rs.rows:
             return None
         r = rs.rows[0]
         return {"id": r[0], "collection": r[1], "saved_at": r[2], "paper": _paper_from_json(r[3])}
 
-    def remove_paper(self, saved_id: int) -> bool:
-        rs = self._client.execute("DELETE FROM saved_papers WHERE id = ?", [saved_id])
+    def remove_paper(self, saved_id: int, owner: Optional[str] = None) -> bool:
+        if owner is not None:
+            rs = self._client.execute(
+                "DELETE FROM saved_papers WHERE id = ? AND owner = ?", [saved_id, owner]
+            )
+        else:
+            rs = self._client.execute("DELETE FROM saved_papers WHERE id = ?", [saved_id])
         return rs.rows_affected > 0
 
-    def list_collections(self) -> List[str]:
-        rs = self._client.execute("SELECT DISTINCT collection FROM saved_papers ORDER BY collection")
+    def list_collections(self, owner: Optional[str] = None) -> List[str]:
+        if owner is not None:
+            rs = self._client.execute(
+                "SELECT DISTINCT collection FROM saved_papers WHERE owner = ? ORDER BY collection", [owner]
+            )
+        else:
+            rs = self._client.execute("SELECT DISTINCT collection FROM saved_papers ORDER BY collection")
         return [r[0] for r in rs.rows]
+
+    def create_user(self, username: str, password_hash: str) -> int:
+        rs = self._client.execute(
+            "INSERT INTO users (username, password_hash, created_at) VALUES (?, ?, ?) RETURNING id",
+            [username, password_hash, _now_iso()],
+        )
+        return int(rs.rows[0][0])
+
+    def get_user(self, username: str) -> Optional[dict]:
+        rs = self._client.execute(
+            "SELECT id, username, password_hash, created_at FROM users WHERE username = ?", [username]
+        )
+        if not rs.rows:
+            return None
+        r = rs.rows[0]
+        return {"id": r[0], "username": r[1], "password_hash": r[2], "created_at": r[3]}
+
+    def delete_user(self, username: str) -> bool:
+        rs = self._client.execute("DELETE FROM users WHERE username = ?", [username])
+        return rs.rows_affected > 0
 
 
 _backend = None  # module-level singleton, built lazily on first use

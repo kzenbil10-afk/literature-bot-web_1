@@ -161,19 +161,59 @@
     header h1 { font-size: 1rem; }
     .row > * { min-width: 100%; }
   }
+
+  .auth-screen {
+    display: none;
+    min-height: 100vh;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  .auth-card { width: 100%; max-width: 360px; }
+  .auth-card h2 { margin: 0 0 4px; font-size: 1.2rem; }
+  .auth-card .auth-tabs { display: flex; gap: 6px; margin-bottom: 6px; }
+  .auth-card .auth-tabs button.active { background: var(--accent-dark); color: white; }
+  .user-bar {
+    display: flex; align-items: center; justify-content: space-between;
+    font-size: 0.75rem; opacity: 0.9; margin-top: 4px;
+  }
+  .user-bar a { color: white; text-decoration: underline; cursor: pointer; }
 </style>
 </head>
 <body>
 
+<div id="authScreen" class="auth-screen">
+  <div class="card auth-card">
+    <h2>📚 Literatür Botu</h2>
+    <div class="status-line">Her kullanıcının kendi hesabı ve kendi kütüphanesi vardır.</div>
+    <div class="auth-tabs">
+      <button class="btn secondary small active" id="authTabLogin" type="button">Giriş Yap</button>
+      <button class="btn secondary small" id="authTabRegister" type="button">Hesap Oluştur</button>
+    </div>
+    <label for="authUsername">Kullanıcı adı</label>
+    <input type="text" id="authUsername" placeholder="örn. kursad" autocomplete="username">
+    <label for="authPassword">Şifre</label>
+    <input type="password" id="authPassword" placeholder="en az 6 karakter" autocomplete="current-password">
+    <div class="actions-row">
+      <button class="btn" id="authSubmit" type="button">Giriş Yap</button>
+      <span id="authStatus" class="status-line"></span>
+    </div>
+  </div>
+</div>
+
+<div id="appRoot" style="display:none;">
+
 <header>
   <h1>📚 Literatür Botu</h1>
   <div class="sub" id="headerSub">OpenAlex · Crossref · arXiv · Semantic Scholar · PubMed · DergiPark</div>
+  <div class="user-bar"><span id="currentUserLabel"></span><a id="btnLogoutHeader">Çıkış yap</a></div>
 </header>
 
 <nav class="tabs">
   <button data-tab="search" class="active">Ara</button>
   <button data-tab="library">Kütüphanem</button>
   <button data-tab="draft">Taslak Oluştur</button>
+  <button data-tab="settings">Ayarlar</button>
 </nav>
 
 <main>
@@ -320,18 +360,47 @@
     <div id="draftOutput"></div>
   </section>
 
+  <!-- ================= SETTINGS TAB ================= -->
+  <section class="view" id="view-settings">
+    <div class="card">
+      <div class="result-title">Hesap</div>
+      <div class="meta" id="settingsUsernameLine"></div>
+      <div class="actions-row">
+        <button class="btn danger" id="btnLogout">Çıkış Yap</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="result-title">Kendi OpenAI API Key'iniz</div>
+      <div class="status-line">Çeviri, derin sentez ve AI destekli taslak oluşturma için kendi OpenAI API
+        key'inizi girmeniz gerekir — sunucuda ortak/paylaşılan bir key kullanılmaz. Key'iniz sadece bu
+        tarayıcıda saklanır ve sadece sizin isteklerinizle birlikte gönderilir. Key girmezseniz: çeviri
+        yine de ücretsiz motorlarla (Google/MyMemory) çalışmaya devam eder, ancak derin sentez ve AI
+        destekli taslak kullanılamaz — bunların yerine kural tabanlı bir iskelet üretilir.</div>
+      <label for="ownApiKey">OpenAI API Key</label>
+      <input type="text" id="ownApiKey" placeholder="sk-...">
+      <div class="actions-row">
+        <button class="btn" id="btnSaveApiKey">Kaydet</button>
+        <button class="btn secondary" id="btnClearApiKey">Temizle</button>
+        <span id="apiKeyStatus" class="status-line"></span>
+      </div>
+    </div>
+  </section>
+
 </main>
 
 <footer class="note">Literatür Botu — kişisel kullanım için. Çeviriler ve taslaklar bir okuma/başlangıç
 yardımcısıdır; atıf ve iddiaları orijinal kaynaklarla doğrulayın.</footer>
+
+</div><!-- /#appRoot -->
 
 <script>
 (function () {
   "use strict";
 
   const state = {
-    lastResults: JSON.parse(localStorage.getItem("litbot_last_results") || "[]"),
-    lastQuery: localStorage.getItem("litbot_last_query") || "",
+    lastResults: [],
+    lastQuery: "",
   };
 
   // ---------------------------------------------------------------------
@@ -343,9 +412,18 @@ yardımcısıdır; atıf ve iddiaları orijinal kaynaklarla doğrulayın.</foote
     opts.headers = Object.assign({ "Content-Type": "application/json" }, opts.headers || {});
     const stored = localStorage.getItem("litbot_pw");
     if (stored) opts.headers["X-App-Password"] = stored;
+    const token = getToken();
+    if (token) opts.headers["Authorization"] = "Bearer " + token;
 
     let resp = await fetch(path, opts);
     if (resp.status === 401) {
+      let data = null;
+      try { data = await resp.clone().json(); } catch (e) { /* ignore */ }
+      if (data && data.error === "login_required") {
+        clearSession();
+        showAuth();
+        return resp;
+      }
       const pw = window.prompt("Bu uygulama şifre korumalı. Şifreyi girin:");
       if (pw) {
         localStorage.setItem("litbot_pw", pw);
@@ -380,6 +458,70 @@ yardımcısıdır; atıf ve iddiaları orijinal kaynaklarla doğrulayın.</foote
   function txt(t) { return document.createTextNode(t); }
 
   // ---------------------------------------------------------------------
+  // accounts / auth -- each visitor has their own account + own private
+  // library (see webapp.py's /api/auth/* and the owner-scoped storage
+  // methods). The token is a signed, stateless credential kept in
+  // localStorage and sent as "Authorization: Bearer <token>" on every API
+  // call (see api() above). litbot_own_key_<username> holds that person's
+  // own OpenAI API key, if they've set one -- never sent anywhere except
+  // as part of that person's own /api/search and /api/draft requests.
+  // ---------------------------------------------------------------------
+  const AUTH_TOKEN_KEY = "litbot_token";
+  const AUTH_USER_KEY = "litbot_username";
+  let authMode = "login";
+
+  function getToken() { return localStorage.getItem(AUTH_TOKEN_KEY); }
+  function getUsername() { return localStorage.getItem(AUTH_USER_KEY) || ""; }
+  function setSession(token, username) {
+    localStorage.setItem(AUTH_TOKEN_KEY, token);
+    localStorage.setItem(AUTH_USER_KEY, username);
+  }
+  function clearSession() {
+    localStorage.removeItem(AUTH_TOKEN_KEY);
+    localStorage.removeItem(AUTH_USER_KEY);
+  }
+  // Per-user namespacing for browser-only state (last search results/query,
+  // own API key) so two accounts sharing one browser never see each other's.
+  function lsKey(base) { return base + "_" + (getUsername() || "anon"); }
+  function ownKeyStorageKey() { return lsKey("litbot_own_key"); }
+  function getOwnApiKey() { return localStorage.getItem(ownKeyStorageKey()) || ""; }
+
+  function showAuth() {
+    document.getElementById("appRoot").style.display = "none";
+    document.getElementById("authScreen").style.display = "flex";
+  }
+
+  function restoreLastResults() {
+    const savedResults = JSON.parse(localStorage.getItem(lsKey("litbot_last_results")) || "[]");
+    const savedQuery = localStorage.getItem(lsKey("litbot_last_query")) || "";
+    state.lastResults = savedResults;
+    state.lastQuery = savedQuery;
+    if (savedResults.length) {
+      document.getElementById("q").value = savedQuery;
+      renderResults(savedResults, null);
+      renderExternalLinks(savedQuery);
+      document.getElementById("searchStatus").textContent = `(önceki arama sonuçları gösteriliyor: "${savedQuery}")`;
+    }
+  }
+
+  function showApp() {
+    document.getElementById("authScreen").style.display = "none";
+    document.getElementById("appRoot").style.display = "";
+    const username = getUsername();
+    document.getElementById("currentUserLabel").textContent = "👤 " + username;
+    document.getElementById("settingsUsernameLine").textContent = "Giriş yapan: " + username;
+    document.getElementById("ownApiKey").value = getOwnApiKey();
+    loadHealth();
+    refreshCollections();
+    restoreLastResults();
+  }
+
+  function initAuth() {
+    if (getToken()) showApp();
+    else showAuth();
+  }
+
+  // ---------------------------------------------------------------------
   // tabs
   // ---------------------------------------------------------------------
   document.querySelectorAll("nav.tabs button").forEach(btn => {
@@ -412,8 +554,7 @@ yardımcısıdır; atıf ve iddiaları orijinal kaynaklarla doğrulayın.</foote
         box.appendChild(label);
       });
       const sub = document.getElementById("headerSub");
-      const providerTxt = h.llm_provider ? `LLM: ${h.llm_provider}` : "LLM yapılandırılmadı (kural tabanlı moda düşülecek)";
-      sub.textContent = `${providerTxt} · depolama: ${h.storage}`;
+      sub.textContent = `depolama: ${h.storage}`;
     } catch (e) {
       document.getElementById("headerSub").textContent = "Sunucuya bağlanılamadı: " + e.message;
     }
@@ -594,6 +735,7 @@ yardımcısıdır; atıf ve iddiaları orijinal kaynaklarla doğrulayın.</foote
     document.getElementById("deepSynthesisBox").innerHTML = "";
 
     try {
+      const ownKey = getOwnApiKey();
       const body = {
         query: q,
         sources,
@@ -603,16 +745,18 @@ yardımcısıdır; atıf ve iddiaları orijinal kaynaklarla doğrulayın.</foote
         translate: document.getElementById("optTranslate").checked,
         deep_research: document.getElementById("optDeep").checked,
       };
+      if (ownKey) body.llm_api_key = ownKey;
       const r = await apiJson("/api/search", { method: "POST", body: JSON.stringify(body) });
       state.lastResults = r.papers;
       state.lastQuery = q;
-      localStorage.setItem("litbot_last_results", JSON.stringify(r.papers));
-      localStorage.setItem("litbot_last_query", q);
+      localStorage.setItem(lsKey("litbot_last_results"), JSON.stringify(r.papers));
+      localStorage.setItem(lsKey("litbot_last_query"), q);
       renderExternalLinks(q);
 
       let statusMsg = `${r.unique_total} sonuç (ham: ${r.raw_total})`;
       if (r.translation_status) statusMsg += ` · çeviri: ${r.translation_status.translated || 0} çevrildi`;
       if (r.dergipark_warning) statusMsg += " · [uyarı] DergiPark önbelleği bulunamadı";
+      if (r.deep_research_skipped_no_key) statusMsg += " · derin sentez atlandı (Ayarlar'dan kendi OpenAI key'inizi girin)";
       statusEl.className = "status-line ok";
       statusEl.textContent = statusMsg;
 
@@ -624,14 +768,6 @@ yardımcısıdır; atıf ve iddiaları orijinal kaynaklarla doğrulayın.</foote
       btn.disabled = false;
     }
   });
-
-  // restore last results on load
-  if (state.lastResults.length) {
-    document.getElementById("q").value = state.lastQuery;
-    renderResults(state.lastResults, null);
-    renderExternalLinks(state.lastQuery);
-    document.getElementById("searchStatus").textContent = `(önceki arama sonuçları gösteriliyor: "${state.lastQuery}")`;
-  }
 
   // ---------------------------------------------------------------------
   // LIBRARY
@@ -784,15 +920,21 @@ yardımcısıdır; atıf ve iddiaları orijinal kaynaklarla doğrulayın.</foote
     status.className = "status-line";
     status.innerHTML = '<span class="spinner"></span> Taslak oluşturuluyor… (LLM ile sentez isteniyorsa biraz sürebilir)';
     try {
+      const ownKey = getOwnApiKey();
       const body = {
         collection: document.getElementById("draftCollection").value || null,
         title: document.getElementById("draftTitle").value || null,
         doc_type: document.getElementById("draftType").value,
         language: document.getElementById("draftLang").value,
       };
+      if (ownKey) body.llm_api_key = ownKey;
       const r = await apiJson("/api/draft", { method: "POST", body: JSON.stringify(body) });
       status.className = "status-line ok";
-      status.textContent = `Hazır (${r.n_sources} kaynak, ${r.n_with_fulltext} tanesi tam metinle) · ${r.used_llm ? "LLM sentezi" : "kural tabanlı iskelet (LLM yapılandırılmadı)"}`;
+      let usedMsg;
+      if (r.used_llm) usedMsg = "LLM sentezi (kendi API key'inizle)";
+      else if (ownKey) usedMsg = "kural tabanlı iskelet (API key ile deneme başarısız oldu)";
+      else usedMsg = "kural tabanlı iskelet (AI taslağı için Ayarlar'dan kendi OpenAI key'inizi girin)";
+      status.textContent = `Hazır (${r.n_sources} kaynak, ${r.n_with_fulltext} tanesi tam metinle) · ${usedMsg}`;
 
       const btnMd = el("button", { class: "btn secondary small" }, [txt("taslak.md indir")]);
       const btnBib = el("button", { class: "btn secondary small" }, [txt("kaynaklar.bib indir")]);
@@ -811,8 +953,84 @@ yardımcısıdır; atıf ve iddiaları orijinal kaynaklarla doğrulayın.</foote
     }
   });
 
-  loadHealth();
-  refreshCollections();
+  // ---------------------------------------------------------------------
+  // AUTH form + settings actions
+  // ---------------------------------------------------------------------
+  function updateAuthTabsUI() {
+    document.getElementById("authTabLogin").classList.toggle("active", authMode === "login");
+    document.getElementById("authTabRegister").classList.toggle("active", authMode === "register");
+    document.getElementById("authSubmit").textContent = authMode === "login" ? "Giriş Yap" : "Hesap Oluştur";
+  }
+  document.getElementById("authTabLogin").addEventListener("click", () => { authMode = "login"; updateAuthTabsUI(); });
+  document.getElementById("authTabRegister").addEventListener("click", () => { authMode = "register"; updateAuthTabsUI(); });
+
+  document.getElementById("authSubmit").addEventListener("click", async () => {
+    const username = document.getElementById("authUsername").value.trim().toLowerCase();
+    const password = document.getElementById("authPassword").value;
+    const statusEl = document.getElementById("authStatus");
+    if (!username || !password) {
+      statusEl.className = "status-line err";
+      statusEl.textContent = "Kullanıcı adı ve şifre girin.";
+      return;
+    }
+    const btn = document.getElementById("authSubmit");
+    btn.disabled = true;
+    statusEl.className = "status-line";
+    statusEl.textContent = "";
+    try {
+      const path = authMode === "login" ? "/api/auth/login" : "/api/auth/register";
+      const resp = await fetch(path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.message || `HTTP ${resp.status}`);
+      setSession(data.token, data.username);
+      document.getElementById("authUsername").value = "";
+      document.getElementById("authPassword").value = "";
+      showApp();
+    } catch (e) {
+      statusEl.className = "status-line err";
+      statusEl.textContent = "Hata: " + e.message;
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  function doLogout() {
+    clearSession();
+    document.getElementById("results").innerHTML = "";
+    document.getElementById("deepSynthesisBox").innerHTML = "";
+    document.getElementById("externalLinksBox").innerHTML = "";
+    document.getElementById("libraryList").innerHTML = "";
+    document.getElementById("draftOutput").innerHTML = "";
+    showAuth();
+  }
+  document.getElementById("btnLogout").addEventListener("click", doLogout);
+  document.getElementById("btnLogoutHeader").addEventListener("click", doLogout);
+
+  document.getElementById("btnSaveApiKey").addEventListener("click", () => {
+    const val = document.getElementById("ownApiKey").value.trim();
+    const status = document.getElementById("apiKeyStatus");
+    if (!val) {
+      status.className = "status-line err";
+      status.textContent = "Boş bırakılamaz (temizlemek için \'Temizle\' butonunu kullanın).";
+      return;
+    }
+    localStorage.setItem(ownKeyStorageKey(), val);
+    status.className = "status-line ok";
+    status.textContent = "Kaydedildi. Artık aramalarda ve taslaklarda kendi key'iniz kullanılacak.";
+  });
+  document.getElementById("btnClearApiKey").addEventListener("click", () => {
+    localStorage.removeItem(ownKeyStorageKey());
+    document.getElementById("ownApiKey").value = "";
+    const status = document.getElementById("apiKeyStatus");
+    status.className = "status-line ok";
+    status.textContent = "Temizlendi. Bundan sonra kendi key'iniz gönderilmeyecek.";
+  });
+
+  initAuth();
 })();
 </script>
 </body>
