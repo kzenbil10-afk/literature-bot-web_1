@@ -220,24 +220,41 @@ def api_search():
     ranked = sort_papers(ranked, by=sort_by)[:max_results]
 
     # translate_papers() and deep_research_synthesis() each make their own
-    # independent NVIDIA/Claude call, and NVIDIA's free tier can take up to
-    # ~90s (bounded retries) per call when it's being slow. They don't depend
-    # on each other's output (translation writes title_tr/abstract_tr; deep
-    # synthesis only reads the original title/abstract), so run them
-    # concurrently instead of back-to-back -- worst case is now ~90s total
-    # instead of ~180s.
+    # independent LLM call. Whether to run them concurrently depends on the
+    # configured provider:
+    #   - NVIDIA's free tier can take up to ~90s (bounded retries) per call
+    #     when it's being slow, and empirically serializes concurrent
+    #     requests from the same key anyway -- so running them concurrently
+    #     here at least saves wall-clock time on the *client* side even if
+    #     NVIDIA processes them one after another server-side.
+    #   - OpenAI/Claude are fast and reliable individually, but two
+    #     concurrent requests to the same OpenAI key can trip a per-account
+    #     concurrent-request rate limit (observed intermittently with
+    #     gpt-5.6-luna as of 2026-09-24) -- one call would spuriously fail
+    #     while the other succeeded. Since each call is quick on its own
+    #     (translation ~2-5s, deep synthesis ~30-40s), running them
+    #     sequentially for these providers is only a little slower and
+    #     removes that failure mode entirely.
     translation_status = None
     deep_synthesis = None
-    jobs = {}
-    with ThreadPoolExecutor(max_workers=2) as executor:
+    resolved_llm_provider = llm_client.detect_provider()
+    run_concurrently = resolved_llm_provider == "nvidia"
+    if run_concurrently:
+        jobs = {}
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            if do_translate:
+                jobs["translate"] = executor.submit(translate_papers, ranked)
+            if do_deep_research:
+                jobs["deep"] = executor.submit(deep_research_synthesis, query=query, papers=ranked, language=language)
+            if "translate" in jobs:
+                translation_status = jobs["translate"].result()
+            if "deep" in jobs:
+                deep_synthesis = jobs["deep"].result()
+    else:
         if do_translate:
-            jobs["translate"] = executor.submit(translate_papers, ranked)
+            translation_status = translate_papers(ranked)
         if do_deep_research:
-            jobs["deep"] = executor.submit(deep_research_synthesis, query=query, papers=ranked, language=language)
-        if "translate" in jobs:
-            translation_status = jobs["translate"].result()
-        if "deep" in jobs:
-            deep_synthesis = jobs["deep"].result()
+            deep_synthesis = deep_research_synthesis(query=query, papers=ranked, language=language)
 
     return jsonify(
         {
