@@ -5,21 +5,31 @@ configured -- it just calls `chat_complete(prompt, ...)` and gets text back
 (or None, if nothing is configured or the call failed; callers always have a
 non-LLM fallback for that case).
 
-Two backends are supported:
+Three backends are supported:
   - "anthropic": Claude, via the `anthropic` package. Needs ANTHROPIC_API_KEY.
+                 Paid (no free tier), but fast and reliable -- see
+                 https://platform.claude.com/docs/en/about-claude/pricing.
+  - "openai":    OpenAI's own API (https://api.openai.com), via the `openai`
+                 package. Needs OPENAI_API_KEY. Paid (no free tier); the
+                 default model (gpt-5.6-luna) is OpenAI's cheapest/fastest
+                 tier -- see https://platform.openai.com/docs/pricing.
   - "nvidia":     any model hosted on NVIDIA's OpenAI-compatible NIM endpoint
                   (https://build.nvidia.com -- "Get API Key" on a model page
                   gives you a key that starts with "nvapi-"). Needs
-                  NVIDIA_API_KEY. Uses the `openai` package pointed at
-                  NVIDIA's base URL, since NIM speaks the OpenAI chat
-                  completions protocol.
+                  NVIDIA_API_KEY. Free, but the free tier is noticeably
+                  slower/less reliable than the two paid options above (see
+                  the bounded-retry logic below).
+
+"openai" and "nvidia" both speak the OpenAI chat completions protocol, so
+they share `_call_openai_compatible()` below and differ only in which base
+URL and key they use.
 
 Provider selection, in order:
   1. an explicit `provider=` argument,
-  2. the LLM_PROVIDER environment variable ("anthropic" or "nvidia"),
-  3. auto-detect from whichever API key is set (ANTHROPIC_API_KEY wins if
-     both happen to be set -- override with LLM_PROVIDER=nvidia if you want
-     NVIDIA used instead).
+  2. the LLM_PROVIDER environment variable ("anthropic", "openai", or "nvidia"),
+  3. auto-detect from whichever API key is set -- ANTHROPIC_API_KEY wins if
+     several happen to be set, then OPENAI_API_KEY, then NVIDIA_API_KEY;
+     override with LLM_PROVIDER if you want a different one used instead.
 
 Model selection, in order:
   1. an explicit `model=` argument,
@@ -33,6 +43,10 @@ from typing import Optional
 
 _DEFAULT_MODELS = {
     "anthropic": "claude-sonnet-4-5",
+    # OpenAI's cheapest/fastest current tier (as of 2026-09-24); override with
+    # --model / LLM_MODEL for a stronger (pricier) model if quality matters
+    # more than cost/speed for your use case.
+    "openai": "gpt-5.6-luna",
     # NVIDIA's free-tier catalog turns over quickly -- older Llama models
     # (including the previous default, meta/llama-3.3-70b-instruct) have been
     # retired (HTTP 410). mistralai/mistral-nemotron was verified working and
@@ -43,7 +57,8 @@ _DEFAULT_MODELS = {
 
 # NVIDIA's OpenAI-compatible NIM endpoint (build.nvidia.com). Override with
 # NVIDIA_BASE_URL if you're pointing at a self-hosted NIM instead of the
-# cloud one.
+# cloud one. OpenAI itself needs no base_url override -- the `openai` package
+# defaults to api.openai.com already.
 _NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
 
 
@@ -56,6 +71,8 @@ def detect_provider(explicit: Optional[str] = None) -> Optional[str]:
         return env_provider.strip().lower()
     if os.environ.get("ANTHROPIC_API_KEY"):
         return "anthropic"
+    if os.environ.get("OPENAI_API_KEY"):
+        return "openai"
     if os.environ.get("NVIDIA_API_KEY"):
         return "nvidia"
     return None
@@ -102,7 +119,11 @@ def _call_anthropic(prompt: str, api_key: str, model: str, max_tokens: int) -> O
     return None
 
 
-def _call_nvidia(prompt: str, api_key: str, model: str, max_tokens: int, base_url: str) -> Optional[str]:
+def _call_openai_compatible(
+    prompt: str, api_key: str, model: str, max_tokens: int, base_url: Optional[str] = None
+) -> Optional[str]:
+    """Shared by "openai" (base_url=None -> api.openai.com) and "nvidia"
+    (base_url=NVIDIA's NIM endpoint) -- both speak the same protocol."""
     try:
         from openai import OpenAI
     except ImportError:
@@ -147,12 +168,18 @@ def chat_complete(
             return None
         return _call_anthropic(prompt, key, model or default_model("anthropic"), max_tokens)
 
+    if resolved_provider == "openai":
+        key = api_key or os.environ.get("OPENAI_API_KEY")
+        if not key:
+            return None
+        return _call_openai_compatible(prompt, key, model or default_model("openai"), max_tokens)
+
     if resolved_provider == "nvidia":
         key = api_key or os.environ.get("NVIDIA_API_KEY")
         if not key:
             return None
         base_url = os.environ.get("NVIDIA_BASE_URL") or _NVIDIA_BASE_URL
-        return _call_nvidia(prompt, key, model or default_model("nvidia"), max_tokens, base_url=base_url)
+        return _call_openai_compatible(prompt, key, model or default_model("nvidia"), max_tokens, base_url=base_url)
 
     # Unknown provider name -> nothing we can do.
     return None

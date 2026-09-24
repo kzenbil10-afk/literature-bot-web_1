@@ -39,9 +39,10 @@ from .translation import translate_papers
 
 def _add_llm_args(p: argparse.ArgumentParser) -> None:
     p.add_argument(
-        "--provider", choices=["auto", "anthropic", "nvidia"], default="auto",
+        "--provider", choices=["auto", "anthropic", "openai", "nvidia"], default="auto",
         help="Kullanılacak LLM sağlayıcısı. auto: ANTHROPIC_API_KEY tanımlıysa Claude, yoksa "
-        "NVIDIA_API_KEY tanımlıysa NVIDIA NIM kullanılır (varsayılan: auto)",
+        "OPENAI_API_KEY tanımlıysa OpenAI, yoksa NVIDIA_API_KEY tanımlıysa NVIDIA NIM "
+        "kullanılır (varsayılan: auto)",
     )
     p.add_argument(
         "--model", default=None,
@@ -90,8 +91,8 @@ def _add_search_args(p: argparse.ArgumentParser) -> None:
         help="Yabancı dildeki başlık/özetlerin otomatik Türkçe çevirisini kapat (varsayılan: açık)",
     )
     p.add_argument(
-        "--translate-engine", choices=["auto", "claude", "nvidia", "mymemory", "google", "none"], default="auto",
-        help="auto: bir LLM sağlayıcısı (Claude/NVIDIA) yapılandırılmışsa onu, yoksa ücretsiz bir "
+        "--translate-engine", choices=["auto", "claude", "openai", "nvidia", "mymemory", "google", "none"], default="auto",
+        help="auto: bir LLM sağlayıcısı (Claude/OpenAI/NVIDIA) yapılandırılmışsa onu, yoksa ücretsiz bir "
         "motoru kullanır (varsayılan: auto)",
     )
     p.set_defaults(translate=True)

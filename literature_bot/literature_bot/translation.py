@@ -152,6 +152,8 @@ def translate_papers(
     forced_provider = provider
     if engine == "claude":
         forced_provider = forced_provider or "anthropic"
+    elif engine == "openai":
+        forced_provider = forced_provider or "openai"
     elif engine == "nvidia":
         forced_provider = forced_provider or "nvidia"
     resolved_provider = llm_client.detect_provider(forced_provider)
@@ -173,7 +175,7 @@ def translate_papers(
     chosen = engine
     if engine == "auto":
         chosen = "llm" if resolved_provider else "auto_free"
-    elif engine in ("claude", "nvidia"):
+    elif engine in ("claude", "openai", "nvidia"):
         chosen = "llm"
 
     if chosen == "llm" and resolved_provider:
