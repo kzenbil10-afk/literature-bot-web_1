@@ -162,7 +162,17 @@ def _call_openai_compatible(
     }
     if use_max_completion_tokens:
         kwargs["max_completion_tokens"] = max_tokens
-        # no `temperature` -- these models only support the default (1)
+        # no `temperature` -- these models only support the default (1).
+        # gpt-5.6-luna is a reasoning model; at the default reasoning effort
+        # a longer prompt (e.g. deep-research synthesis over several papers'
+        # abstracts) can take well over our request timeout. "low" trades a
+        # little depth for a lot of speed, which matches why this project
+        # moved off NVIDIA in the first place -- override with
+        # OPENAI_REASONING_EFFORT if you want more depth and can afford the
+        # wait (low/medium/high; unset falls back to the model's default).
+        reasoning_effort = os.environ.get("OPENAI_REASONING_EFFORT", "low")
+        if reasoning_effort:
+            kwargs["reasoning_effort"] = reasoning_effort
     else:
         kwargs["max_tokens"] = max_tokens
         kwargs["temperature"] = 0.4
