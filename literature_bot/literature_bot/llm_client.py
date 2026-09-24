@@ -97,6 +97,17 @@ def is_configured(provider: Optional[str] = None) -> bool:
 _REQUEST_TIMEOUT_SECONDS = 30
 _MAX_ATTEMPTS = 3
 
+# OpenAI's own API doesn't have NVIDIA's "silent hang" failure mode -- it
+# either answers or errors out -- so the risk we're guarding against is
+# different: gpt-5.6-luna is a reasoning model, and even at
+# reasoning_effort="low" a genuinely long prompt (e.g. deep-research
+# synthesis over several papers) can legitimately take close to 30s to
+# produce a full, useful answer (measured ~29s for a typical 10-paper
+# request as of 2026-09-24). A 30s cutoff clips that right at the edge, so
+# OpenAI calls get a longer budget; NVIDIA keeps the short one since a slow
+# NVIDIA response is usually a sign it's never going to answer at all.
+_OPENAI_REQUEST_TIMEOUT_SECONDS = 75
+
 # Temporary diagnostic aid: chat_complete() never raises (callers rely on
 # that to fall back cleanly), so a caller that wants to know *why* the last
 # call returned None -- e.g. to show it in an API response while debugging a
@@ -155,7 +166,8 @@ def _call_openai_compatible(
     except ImportError:
         _LAST_ERROR = "openai package not importable"
         return None
-    client = OpenAI(api_key=api_key, base_url=base_url, timeout=_REQUEST_TIMEOUT_SECONDS, max_retries=0)
+    timeout = _OPENAI_REQUEST_TIMEOUT_SECONDS if use_max_completion_tokens else _REQUEST_TIMEOUT_SECONDS
+    client = OpenAI(api_key=api_key, base_url=base_url, timeout=timeout, max_retries=0)
     kwargs = {
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
